@@ -21,8 +21,7 @@ jobs:
         include:
           - {os: ubuntu-latest, goos: linux, goarch: amd64}
           - {os: windows-latest, goos: windows, goarch: amd64}
-          - {os: macos-13, goos: darwin, goarch: amd64}
-          - {os: macos-14, goos: darwin, goarch: arm64}
+          - {os: macos-15, goos: darwin, goarch: arm64}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
