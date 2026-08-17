@@ -40,11 +40,14 @@ func (c *Client) validateTrainingPlacementAccess(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 || isAuthURL(response.Request.URL) {
+	if isAuthURL(response.Request.URL) {
+		return fmt.Errorf("%w: ERP redirected the CDC menu request to login", ErrSessionRejected)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("open ERP CDC menu: server returned %s", response.Status)
 	}
 	if isDeniedPage(body) {
-		return fmt.Errorf("%w: ERP rejected the CDC resume menu request", errSessionRejected)
+		return fmt.Errorf("%w: ERP rejected the CDC resume menu request", ErrSessionRejected)
 	}
 
 	action, values, err := parseFormByID(body, "menuform")
@@ -69,11 +72,14 @@ func (c *Client) validateTrainingPlacementAccess(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 || isAuthURL(response.Request.URL) {
+	if isAuthURL(response.Request.URL) {
+		return fmt.Errorf("%w: ERP redirected the Training Placement request to login", ErrSessionRejected)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("enter Training Placement application: server returned %s", response.Status)
 	}
 	if isDeniedPage(body) {
-		return fmt.Errorf("%w: ERP rejected the Training Placement entry request", errSessionRejected)
+		return fmt.Errorf("%w: ERP rejected the Training Placement entry request", ErrSessionRejected)
 	}
 	lower := strings.ToLower(string(body))
 	if !strings.Contains(lower, "studentform.jsp") || !strings.Contains(lower, "cvgenerate.jsp") {

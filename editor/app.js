@@ -944,6 +944,15 @@
     target.hidden = !message;
   }
 
+  function showOTPPrompt(show) {
+    const panel = document.getElementById("otp-panel");
+    const wasHidden = panel.hidden;
+    panel.hidden = !show;
+    if (show && wasHidden) {
+      window.requestAnimationFrame(() => document.getElementById("setup-otp").focus());
+    }
+  }
+
   async function fetchSetupQuestion() {
     setSetupError("");
     const roll = document.getElementById("setup-roll").value.trim();
@@ -992,7 +1001,7 @@
     button.disabled = true;
     try {
       await apiFetch("/api/erp/otp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ otp: input.value.trim() }) });
-      document.getElementById("otp-panel").hidden = true;
+      showOTPPrompt(false);
       showToast("OTP accepted. Finishing import…");
     } catch (error) {
       input.disabled = false;
@@ -1019,7 +1028,7 @@
     if (jobID) handledSetupJobID = jobID;
     setupJobID = 0;
     setSetupWaiting(false);
-    document.getElementById("otp-panel").hidden = true;
+    showOTPPrompt(false);
     if (!job.ok) {
       const message = job.error || "ERP import failed. Your local resume was not changed.";
       showSetup(true);
@@ -1047,6 +1056,7 @@
       try {
         const response = await apiFetch("/api/app/status");
         const status = await response.json();
+        document.getElementById("app-version").textContent = status.version && status.version !== "dev" ? ` · ${status.version}` : "";
         const job = status.job || {};
         const jobID = Number(job.id) || 0;
         if (!setupJobID && job.kind === "import" && jobID !== handledSetupJobID && (job.running || (job.completed && status.onboarding))) {
@@ -1060,7 +1070,7 @@
         const waitingForStart = document.getElementById("setup-form").classList.contains("is-waiting") && !setupJobID;
         const shouldShow = Boolean(status.onboarding || status.otpRequired || waitingForStart || (isSetupJob && job.running));
         showSetup(shouldShow);
-        document.getElementById("otp-panel").hidden = !status.otpRequired;
+        showOTPPrompt(Boolean(status.otpRequired));
         if (isSetupJob && job.running) setSetupWaiting(true);
       } catch (_) {
         // The event stream and the next poll can recover from a transient request failure.
@@ -1098,7 +1108,7 @@
         if (payload.message) appendERPLog(payload.message);
         showToast(payload.message || "ERP PDF saved.");
         showSetup(false);
-        document.getElementById("otp-panel").hidden = true;
+        showOTPPrompt(false);
         loadServerResume();
       } else {
         if (payload.error) appendERPLog(`error: ${payload.error}`);
@@ -1112,7 +1122,7 @@
     });
     erpEventSource.addEventListener("phase", (event) => {
       const payload = JSON.parse(event.data || "{}");
-      if (payload.phase === "otp-required") document.getElementById("otp-panel").hidden = false;
+      if (payload.phase === "otp-required") showOTPPrompt(true);
       appendERPLog(payload.phase || "");
     });
     erpEventSource.addEventListener("error", () => {

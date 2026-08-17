@@ -39,14 +39,14 @@ func (c *Client) FetchResumeForm(ctx context.Context) (*FormSnapshot, error) {
 		return nil, fmt.Errorf("resume form returned %s", response.Status)
 	}
 	if isAuthURL(response.Request.URL) {
-		return nil, fmt.Errorf("ERP session expired while fetching the resume form")
+		return nil, fmt.Errorf("%w: ERP redirected the resume form request to login", ErrSessionRejected)
 	}
 	body, err := readLimited(response.Body, 12<<20)
 	if err != nil {
 		return nil, err
 	}
 	if isDeniedPage(body) {
-		return nil, fmt.Errorf("%w: ERP rejected the resume form request", errSessionRejected)
+		return nil, fmt.Errorf("%w: ERP rejected the resume form request", ErrSessionRejected)
 	}
 	return ParseForm(body)
 }
@@ -83,10 +83,10 @@ func (c *Client) SyncResume(ctx context.Context, fields map[string]string) error
 		return fmt.Errorf("ERP resume save returned %s", response.Status)
 	}
 	if isAuthURL(response.Request.URL) {
-		return fmt.Errorf("ERP session expired while saving the resume")
+		return fmt.Errorf("%w: ERP redirected the resume save request to login", ErrSessionRejected)
 	}
 	if isDeniedPage(body) {
-		return fmt.Errorf("%w: ERP rejected the resume save request", errSessionRejected)
+		return fmt.Errorf("%w: ERP rejected the resume save request", ErrSessionRejected)
 	}
 
 	progress.Logf("ERP sync: reading the saved form back for verification")

@@ -23,7 +23,11 @@ import (
 const DefaultBaseURL = "https://erp.iitkgp.ac.in"
 
 var tokenRE = regexp.MustCompile(`ssoToken=[A-Za-z0-9._-]+`)
-var errSessionRejected = errors.New("ERP session rejected")
+
+// ErrSessionRejected marks responses where ERP explicitly sent the client back
+// to authentication or denied access. Callers can use this to decide whether a
+// saved login should be replaced without guessing from error text.
+var ErrSessionRejected = errors.New("ERP session rejected")
 
 var deniedPageMarkers = []string{
 	"you may not have access to this page",
@@ -150,7 +154,7 @@ func (c *Client) authenticate(ctx context.Context, fresh bool) error {
 			progress.Logf("ERP auth: saved session is valid")
 			return nil
 		}
-		if !errors.Is(validationErr, errSessionRejected) {
+		if !errors.Is(validationErr, ErrSessionRejected) {
 			return fmt.Errorf("validate saved ERP session: %w", validationErr)
 		}
 		progress.Logf("ERP auth: saved session is invalid; starting a new login")
@@ -184,8 +188,8 @@ func (c *Client) authenticate(ctx context.Context, fresh bool) error {
 		return fmt.Errorf("ERP login did not return a session token")
 	}
 	c.installCookie(token)
-	progress.Logf("ERP auth: validating the new session")
-	if err := c.validateSession(ctx, token); err != nil {
+	progress.Logf("ERP auth: validating the new login")
+	if err := c.validateLoginResponse(ctx, response, body, token); err != nil {
 		return fmt.Errorf("new ERP session is invalid: %w", err)
 	}
 	if err := atomicWrite(filepath.Join(c.SecretsDir, ".session"), []byte("ssoToken="+token+"\n"), 0o600); err != nil {
@@ -338,10 +342,10 @@ func (c *Client) DownloadPDF(ctx context.Context, variant int) ([]byte, error) {
 		return nil, fmt.Errorf("ERP PDF request returned %s", response.Status)
 	}
 	if isAuthURL(response.Request.URL) {
-		return nil, fmt.Errorf("ERP session expired while downloading the PDF")
+		return nil, fmt.Errorf("%w: ERP redirected the PDF request to login", ErrSessionRejected)
 	}
 	if isDeniedPage(data) {
-		return nil, fmt.Errorf("%w: ERP rejected the CV%d PDF request", errSessionRejected, variant)
+		return nil, fmt.Errorf("%w: ERP rejected the CV%d PDF request", ErrSessionRejected, variant)
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("ERP CV generator returned an empty PDF body for CV%d; the resume form was saved, but the PDF endpoint did not render a document", variant)
@@ -364,19 +368,31 @@ func (c *Client) validateSession(ctx context.Context, token string) error {
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 || isAuthURL(response.Request.URL) {
-		return fmt.Errorf("%w: ERP returned %s", errSessionRejected, response.Status)
+		return fmt.Errorf("%w: ERP returned %s", ErrSessionRejected, response.Status)
 	}
 	body, err := readLimited(response.Body, 2<<20)
 	if err != nil {
 		return err
 	}
 	if !validSessionBody(body) {
-		return fmt.Errorf("%w: ERP returned a login or access-denied page", errSessionRejected)
+		return fmt.Errorf("%w: ERP returned a login or access-denied page", ErrSessionRejected)
 	}
 	if err := c.validateTrainingPlacementAccess(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+// validateLoginResponse avoids replaying a one-time SSO handoff token when the
+// authentication POST already followed ERP's redirect to the logged-in home
+// page. Replaying that token can make a successful new login look expired.
+func (c *Client) validateLoginResponse(ctx context.Context, response *http.Response, body []byte, token string) error {
+	if response != nil && response.Request != nil && isERPHomeURL(response.Request.URL) &&
+		response.StatusCode >= 200 && response.StatusCode < 300 && validSessionBody(body) {
+		progress.Logf("ERP auth: login redirect already established the session")
+		return c.validateTrainingPlacementAccess(ctx)
+	}
+	return c.validateSession(ctx, token)
 }
 
 func validSessionBody(body []byte) bool {
@@ -401,6 +417,14 @@ func isDeniedPage(body []byte) bool {
 		}
 	}
 	return false
+}
+
+func isERPHomeURL(value *url.URL) bool {
+	if value == nil {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSuffix(value.Path, "/"))
+	return path == "/iit_erp3" || strings.HasPrefix(path, "/iit_erp3/")
 }
 
 func (c *Client) postText(ctx context.Context, path string, values url.Values) (string, error) {

@@ -876,8 +876,8 @@ func friendlyError(err error) string {
 	if strings.Contains(strings.ToLower(message), "security question") {
 		return "ERP needs the answer to a new security question. Update your local login and retry."
 	}
-	if strings.Contains(strings.ToLower(message), "session") {
-		return "Your ERP session expired. Choose fresh login and retry."
+	if errors.Is(err, erp.ErrSessionRejected) {
+		return "ERP did not keep this login active. Try again with the newest OTP. Your local resume was not changed."
 	}
 	if strings.Contains(strings.ToLower(message), "empty pdf") {
 		return "ERP returned no PDF. Your local resume is safe; retry later."

@@ -3,12 +3,15 @@ package editorserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"cvpp/internal/erp"
 )
 
 func TestBootstrapCookieAndSecretFreeStatus(t *testing.T) {
@@ -115,5 +118,17 @@ func TestJobStatusRetainsImportCompletionForPollingClients(t *testing.T) {
 	completed := runner.status()
 	if completed.ID != jobID || completed.Running || !completed.Completed || !completed.OK || completed.Message != "import complete" {
 		t.Fatalf("unexpected completed job state: %#v", completed)
+	}
+}
+
+func TestFriendlyErrorDoesNotGuessSessionExpiry(t *testing.T) {
+	message := "new ERP session is invalid: ERP returned an unexpected page"
+	if got := friendlyError(errors.New(message)); got != message {
+		t.Fatalf("friendlyError() = %q, want original diagnostic", got)
+	}
+
+	want := "ERP did not keep this login active. Try again with the newest OTP. Your local resume was not changed."
+	if got := friendlyError(erp.ErrSessionRejected); got != want {
+		t.Fatalf("friendlyError(session rejection) = %q, want %q", got, want)
 	}
 }

@@ -153,6 +153,61 @@ func TestAuthenticateAndReuseSession(t *testing.T) {
 	}
 }
 
+func TestAuthenticateDoesNotReplayCompletedLoginRedirect(t *testing.T) {
+	secrets := t.TempDir()
+	credentials, _ := json.Marshal(map[string]any{
+		"roll_number": "23XX00000", "password": "password", "answers": map[string]string{"Question?": "answer"},
+	})
+	if err := os.WriteFile(filepath.Join(secrets, "erpcreds.json"), credentials, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	handoffUses := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/SSOAdministration/getSecurityQues.htm":
+			fmt.Fprint(writer, "Question?")
+		case "/SSOAdministration/getEmilOTP.htm":
+			fmt.Fprint(writer, `{"msg":"An OTP has been sent"}`)
+		case "/SSOAdministration/auth.htm":
+			http.Redirect(writer, request, "/IIT_ERP3/?ssoToken=single-use-token", http.StatusFound)
+		case "/IIT_ERP3/":
+			if request.URL.Query().Get("ssoToken") != "" {
+				handoffUses++
+				if handoffUses > 1 {
+					fmt.Fprint(writer, "You may not have access to this page. Direct access to any URL is restricted.")
+					return
+				}
+				http.SetCookie(writer, &http.Cookie{Name: "erp-session", Value: "active", Path: "/"})
+			}
+			fmt.Fprint(writer, `<title>Welcome Test Student to ERP</title><script src="getModules.htm"></script>`)
+		case "/IIT_ERP3/showmenu.htm":
+			if cookie, err := request.Cookie("erp-session"); err != nil || cookie.Value != "active" {
+				http.Error(writer, "missing ERP session", http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprint(writer, `<form id="menuform" method="post" action="../TrainingPlacementSSO/TPStudent.jsp"><input name="ssoToken" value="single-use-token"></form>`)
+		case "/TrainingPlacementSSO/TPStudent.jsp":
+			fmt.Fprint(writer, `<a href="StudentForm.jsp">Profile</a><script>url = "cvGenerate.jsp"</script>`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.OTP = staticOTP("123456")
+	if err := client.Authenticate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if handoffUses != 1 {
+		t.Fatalf("SSO handoff token used %d times, want 1", handoffUses)
+	}
+}
+
 func TestBrowserLoginURLReturnsFreshUnvalidatedToken(t *testing.T) {
 	secrets := t.TempDir()
 	credentials, _ := json.Marshal(map[string]any{

@@ -9,61 +9,52 @@
   <body>
     <header class="app-header">
       <div>
-        <p class="eyebrow">IIT KGP ERP</p>
         <h1>CV++</h1>
+        <p>Local ERP resume editor<span id="app-version"></span></p>
       </div>
     </header>
 
     <section id="setup-overlay" class="setup-overlay" hidden aria-labelledby="setup-title">
       <div class="setup-card">
-        <p class="eyebrow">Private on this computer</p>
+        <p class="setup-kicker">Local setup</p>
         <h2 id="setup-title">Connect your IIT KGP ERP account</h2>
-        <p class="setup-privacy">Your ERP credentials, session, resume, and PDFs are stored only on this computer. CV++ sends them directly from this local app to IIT KGP ERP; there is no CV++ server, analytics, or cloud copy.</p>
+        <p class="setup-privacy">Your login and resume stay on this computer. CV++ connects directly to IIT KGP ERP.</p>
         <form id="setup-form">
           <label class="field"><span>ERP roll number</span><input id="setup-roll" class="input" autocomplete="username" required></label>
           <label class="field"><span>ERP password</span><input id="setup-password" class="input" type="password" autocomplete="current-password" required></label>
           <div class="setup-question-row"><label class="field"><span>Security question</span><input id="setup-question" class="input" required readonly></label><button id="fetch-question" class="button secondary" type="button">Fetch question</button></div>
           <label class="field"><span>Answer</span><input id="setup-answer" class="input" type="password" autocomplete="off" required></label>
-          <label class="check"><input id="setup-manual-question" type="checkbox"> I entered the question manually</label>
+          <label class="check"><input id="setup-manual-question" type="checkbox"> Enter the question manually</label>
           <p id="setup-error" class="setup-error" hidden></p>
-          <button class="button primary" type="submit">Save and import my existing ERP resume</button>
-          <button id="restore-backup" class="button secondary" type="button">Restore a local JSON backup instead</button>
+          <div class="setup-actions">
+            <button class="button primary" type="submit">Connect and import</button>
+            <button id="restore-backup" class="button secondary" type="button">Restore JSON backup</button>
+          </div>
         </form>
-        <div id="otp-panel" class="otp-panel" hidden><h3>Enter the ERP email OTP</h3><p>ERP sent a one-time code to your registered email. It is used only for this login and is never saved.</p><form id="otp-form"><input id="setup-otp" class="input" inputmode="numeric" pattern="[0-9]{4,8}" autocomplete="one-time-code" required><button class="button primary" type="submit">Continue</button></form></div>
+        <div id="otp-panel" class="otp-panel" hidden>
+          <h3>Enter the email OTP</h3>
+          <p>Use the newest code sent by ERP.</p>
+          <form id="otp-form"><input id="setup-otp" class="input" inputmode="numeric" pattern="[0-9]{4,8}" autocomplete="one-time-code" required aria-label="ERP email OTP"><button class="button primary" type="submit">Continue</button></form>
+        </div>
       </div>
     </section>
 
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="sidebar-actions" aria-label="Resume file actions">
-          <button id="save-json" class="button primary">Save</button>
-          <button id="open-json" class="button secondary">Open JSON</button>
-          <button id="download-json" class="button secondary">Download copy</button>
-          <button id="import-snapshot" class="button secondary">Import portal snapshot</button>
-        </div>
-
         <section id="server-panel" class="server-panel" hidden>
-          <div class="panel-heading">
-            <strong>Local workflow</strong>
-            <span>Server mode</span>
-          </div>
-          <label class="field compact">
-            <span class="field-label">ERP PDF</span>
-            <select id="erp-cv" class="select">
-              <option value="1">CV1</option>
-              <option value="2">CV2</option>
-              <option value="3">CV3</option>
-            </select>
-          </label>
-          <label class="check server-check">
-            <input id="erp-fresh-login" type="checkbox">
-            Fresh login
-          </label>
-          <button id="open-pdf-viewer" class="button secondary">Open PDF Viewer</button>
-          <button id="open-erp" class="button secondary">Open ERP</button>
           <button id="run-erp" class="button primary">Update ERP Resume</button>
-          <pre id="erp-log" class="erp-log" hidden></pre>
-          <details class="advanced-tools"><summary>Advanced and privacy</summary><button id="forget-login" class="button danger small" type="button">Forget ERP login</button><button id="quit-app" class="button secondary small" type="button">Quit CV++</button><p>JSON import/export, portal snapshots, Open ERP, CV2/CV3, logs, and manual save remain available here for advanced workflows.</p></details>
+          <details class="advanced-tools">
+            <summary>ERP options</summary>
+            <div class="tool-list">
+              <label class="field compact"><span class="field-label">CV version</span><select id="erp-cv" class="select"><option value="1">CV1</option><option value="2">CV2</option><option value="3">CV3</option></select></label>
+              <label class="check server-check"><input id="erp-fresh-login" type="checkbox"> Fresh login</label>
+              <button id="open-pdf-viewer" class="button secondary">Open PDF</button>
+              <button id="open-erp" class="button secondary">Open ERP</button>
+              <button id="forget-login" class="button danger" type="button">Forget ERP login</button>
+              <button id="quit-app" class="button secondary" type="button">Quit CV++</button>
+              <pre id="erp-log" class="erp-log" hidden></pre>
+            </div>
+          </details>
         </section>
 
         <nav id="navigation" aria-label="Resume sections">
@@ -83,6 +74,16 @@
         </div>
 
         <div id="validation-summary" class="validation-summary" hidden></div>
+
+        <details class="advanced-tools file-tools">
+          <summary>File tools</summary>
+          <div class="sidebar-actions" aria-label="Resume file actions">
+            <button id="save-json" class="button secondary">Save now</button>
+            <button id="open-json" class="button secondary">Open JSON</button>
+            <button id="download-json" class="button secondary">Download copy</button>
+            <button id="import-snapshot" class="button secondary">Import portal snapshot</button>
+          </div>
+        </details>
       </aside>
 
       <main id="workspace" class="workspace" tabindex="-1"></main>
