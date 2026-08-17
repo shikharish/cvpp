@@ -10,18 +10,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: {go-version-file: cvpp/go.mod, cache-dependency-path: cvpp/go.sum}
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
       - name: Install AppImage tooling
         run: |
           sudo apt-get update && sudo apt-get install -y squashfs-tools
           curl -fsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -o /tmp/appimagetool
           chmod +x /tmp/appimagetool && sudo mv /tmp/appimagetool /usr/local/bin/appimagetool
       - name: Build portable assets
-        run: ./cvpp/scripts/release.sh "${GITHUB_REF_NAME}"
+        run: ./scripts/release.sh "${GITHUB_REF_NAME}"
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: cvpp/dist/*
+          files: dist/*
           generate_release_notes: true
           body: |
             CV++ releases are unsigned. See the README for one-time Windows SmartScreen and macOS Gatekeeper instructions.

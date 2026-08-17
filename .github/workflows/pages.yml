@@ -2,7 +2,9 @@ name: GitHub Pages
 on:
   push:
     branches: [main]
-    paths: [cvpp/site/**]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
 permissions:
   contents: read
   pages: write
@@ -15,5 +17,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
-        with: {path: cvpp/site}
+        with:
+          path: site
       - uses: actions/deploy-pages@v4
