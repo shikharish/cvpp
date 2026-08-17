@@ -43,8 +43,10 @@ cat > "$DIST/build/AppDir/cvpp.desktop" <<'DESKTOP'
 Type=Application
 Name=CV++
 Exec=cvpp
+Icon=cvpp
 Categories=Utility;
 DESKTOP
+cp "$ROOT/assets/cvpp.svg" "$DIST/build/AppDir/cvpp.svg"
 cat > "$DIST/build/AppDir/AppRun" <<'APP'
 #!/bin/sh
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
