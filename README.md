@@ -12,9 +12,9 @@ Download the latest build from [GitHub Releases](https://github.com/shikharish/c
 
 ### First launch warnings
 
-Releases are currently unsigned. Only bypass these warnings for a file downloaded from the official release page:
+Releases are not notarized by Apple or signed with a paid Developer ID. Only bypass these warnings for a file downloaded from the official release page:
 
-- macOS: in Finder, Control-click (or right-click) CV++, choose **Open**, then confirm **Open**.
+- macOS: try to open CV++ once, then go to **System Settings → Privacy & Security** and choose **Open Anyway**. Confirm **Open** when prompted.
 - Windows: select **More info**, then **Run anyway** in SmartScreen.
 
 ## Use

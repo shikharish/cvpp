@@ -18,19 +18,6 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H=wi
 build windows amd64 "$DIST/build/windows/cvpp.exe"
 (cd "$DIST/build/windows" && zip -q -r "$DIST/CV++-windows-amd64.zip" .)
 
-for arch in arm64; do
-  build darwin "$arch" "$DIST/build/cvpp-darwin-$arch"
-  APP_DIR="$DIST/build/cvpp-$arch.app"
-  mkdir -p "$APP_DIR/Contents/MacOS"
-  cp "$DIST/build/cvpp-darwin-$arch" "$APP_DIR/Contents/MacOS/CV++"
-  cat > "$APP_DIR/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>CV++</string><key>CFBundleIdentifier</key><string>org.cvpp.app</string><key>CFBundleName</key><string>CV++</string><key>CFBundleVersion</key><string>$VERSION</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
-PLIST
-  mv "$APP_DIR" "$DIST/build/CV++.app"
-  (cd "$DIST/build" && zip -q -r "$DIST/CV++-macos-$arch.zip" "CV++.app")
-  rm -rf "$DIST/build/CV++.app"
-done
-
 build linux amd64 "$DIST/build/cvpp-linux-amd64"
 cp "$DIST/build/cvpp-linux-amd64" "$DIST/build/CV++"
 tar -C "$DIST/build" -czf "$DIST/CV++-linux-amd64.tar.gz" cvpp-linux-amd64
@@ -61,5 +48,4 @@ else
   tar -C "$DIST/build/AppDir" -czf "$DIST/CV++-linux-amd64.AppImage" .
 fi
 
-(cd "$DIST" && sha256sum *.zip *.tar.gz *.AppImage > SHA256SUMS)
 echo "Wrote release assets to $DIST"
