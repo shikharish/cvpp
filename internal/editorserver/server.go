@@ -158,8 +158,11 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/pdf/cv2", s.requireToken(s.handlePDFViewer))
 	mux.HandleFunc("/pdf/cv3", s.requireToken(s.handlePDFViewer))
 	mux.HandleFunc("/pdf/file/cv1", s.requireToken(s.handlePDFFile))
+	mux.HandleFunc("/pdf/file/cv1/", s.requireToken(s.handlePDFFile))
 	mux.HandleFunc("/pdf/file/cv2", s.requireToken(s.handlePDFFile))
+	mux.HandleFunc("/pdf/file/cv2/", s.requireToken(s.handlePDFFile))
 	mux.HandleFunc("/pdf/file/cv3", s.requireToken(s.handlePDFFile))
+	mux.HandleFunc("/pdf/file/cv3/", s.requireToken(s.handlePDFFile))
 
 	mux.Handle("/", http.FileServer(http.FS(editor.Files)))
 }
@@ -557,7 +560,13 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusBadRequest)
 		return
 	}
+	nonce, err := appdata.RandomToken(16)
+	if err != nil {
+		writeAPIError(w, err, http.StatusInternalServerError)
+		return
+	}
 	setNoCache(w)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-src 'self'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; object-src 'none'; base-uri 'none'; form-action 'self'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
@@ -565,7 +574,7 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CV%d PDF viewer</title>
-  <style>
+  <style nonce="%s">
     :root { color-scheme: light; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; min-width: 900px; color: #172033; background: #101828; }
     header { height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 14px; color: white; background: #183153; border-bottom: 1px solid #6f9ee9; }
@@ -580,15 +589,18 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
     <div id="status">Waiting for pdf/resume-erp-cv%d.pdf…</div>
   </header>
   <iframe id="pdf" title="CV%d PDF"></iframe>
-  <script>
+  <script nonce="%s">
     const cv = %d;
     const statusURL = "/api/pdf/status?cv=%d";
     const fileURL = "/pdf/file/cv%d";
     const status = document.getElementById("status");
     const frame = document.getElementById("pdf");
     let currentSignature = "";
+    let polling = false;
 
     async function poll() {
+      if (polling) return;
+      polling = true;
       try {
         const response = await fetch(statusURL, { cache: "no-store" });
         if (!response.ok) throw new Error(response.status + " " + response.statusText);
@@ -600,12 +612,14 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
         const signature = payload.signature || (payload.modTime + ":" + payload.size);
         if (signature !== currentSignature) {
           currentSignature = signature;
-          frame.src = fileURL + "?v=" + encodeURIComponent(signature) + "&reload=" + Date.now();
+          frame.src = fileURL + "/" + encodeURIComponent(signature) + "/" + Date.now() + "#view=Fit&zoom=page-fit";
         }
         const updated = payload.modTime ? new Date(payload.modTime).toLocaleTimeString() : "unknown time";
         status.textContent = "Watching " + payload.path + " · " + payload.size + " bytes · updated " + updated;
       } catch (error) {
         status.textContent = "PDF watcher error: " + (error && error.message ? error.message : error);
+      } finally {
+        polling = false;
       }
     }
 
@@ -613,7 +627,7 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
     setInterval(poll, 1000);
   </script>
 </body>
-</html>`, variant, variant, variant, variant, variant, variant, variant)
+</html>`, variant, nonce, variant, variant, variant, nonce, variant, variant, variant)
 }
 
 func (s *Server) handlePDFFile(w http.ResponseWriter, r *http.Request) {
@@ -703,7 +717,11 @@ func cvFromPath(path, prefix string) (int, error) {
 	if !strings.HasPrefix(path, prefix) {
 		return 0, fmt.Errorf("cv must be 1, 2, or 3")
 	}
-	return parseCV(strings.TrimPrefix(path, prefix))
+	value := strings.TrimPrefix(path, prefix)
+	if separator := strings.IndexByte(value, '/'); separator >= 0 {
+		value = value[:separator]
+	}
+	return parseCV(value)
 }
 
 func setNoCache(w http.ResponseWriter) {
@@ -777,6 +795,7 @@ func (j *jobRunner) start(cv int, freshLogin, downloadOnly bool) (uint64, error)
 		err := workflow.RunERP(context.Background(), j.server.options.RepoRoot, workflow.ERPOptions{
 			Variant:      cv,
 			JSONPath:     j.server.options.JSONPath,
+			Output:       j.server.pdfPath(cv),
 			SecretsDir:   j.server.options.SecretsDir,
 			BaseURL:      j.server.options.BaseURL,
 			DownloadOnly: downloadOnly,
@@ -789,8 +808,7 @@ func (j *jobRunner) start(cv int, freshLogin, downloadOnly bool) (uint64, error)
 			j.finish(false, "", friendlyError(err))
 			return
 		}
-		output := "pdf/resume-erp-cv" + strconv.Itoa(cv) + ".pdf"
-		j.finish(true, "ERP PDF saved to "+output, "")
+		j.finish(true, fmt.Sprintf("ERP CV%d PDF updated locally.", cv), "")
 	}()
 	return jobID, nil
 }

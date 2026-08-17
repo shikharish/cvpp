@@ -895,11 +895,13 @@
   function setupServerMode() {
     const panel = document.getElementById("server-panel");
     panel.hidden = false;
+    document.getElementById("editor-layout").classList.add("has-pdf");
     document.getElementById("pdf-column").hidden = false;
+    document.getElementById("pdf-resizer").hidden = false;
     document.getElementById("open-pdf-viewer").addEventListener("click", openPDFViewer);
     document.getElementById("open-erp").addEventListener("click", openERPFromEditor);
     document.getElementById("run-erp").addEventListener("click", runERPFromEditor);
-    document.getElementById("erp-cv").addEventListener("change", () => { refreshPDF(); });
+    document.getElementById("erp-cv").addEventListener("change", () => { refreshPDF(true); });
     document.getElementById("forget-login").addEventListener("click", forgetLogin);
     document.getElementById("quit-app").addEventListener("click", quitApp);
     setupPDFResizer();
@@ -921,7 +923,7 @@
     catch (error) { showDialog("Could not quit CV++", `<p>${escapeHtml(error.message || error)}</p>`); }
   }
 
-  async function refreshPDF() {
+  async function refreshPDF(forceReload) {
     if (!serverMode) return;
     const cv = Number(document.getElementById("erp-cv").value) || 1;
     const requestSequence = ++pdfRequestSequence;
@@ -939,38 +941,48 @@
       if (!payload.exists) { pdfState.textContent = "No PDF downloaded yet"; return; }
       pdfState.textContent = `Updated ${new Date(payload.modTime).toLocaleTimeString()}`;
       const signature = payload.signature || `${payload.modTime}:${payload.size}`;
-      if (signature && signature !== pdfSignature) {
-        pdfSignature = signature;
-        updatePDFFrame(cv, signature);
-      }
-    } catch (_) { document.getElementById("pdf-state").textContent = "PDF unavailable"; }
+      if (!signature || (!forceReload && signature === pdfSignature)) return;
+      pdfSignature = signature;
+      updatePDFFrame(cv, localPDFURL(cv, signature));
+    } catch (_) {
+      if (requestSequence === pdfRequestSequence) document.getElementById("pdf-state").textContent = "PDF unavailable";
+    }
   }
 
-  function updatePDFFrame(cv, signature) {
+  function localPDFURL(cv, signature) {
+    return `/pdf/file/cv${cv}/${encodeURIComponent(signature)}/${Date.now()}#view=Fit&zoom=page-fit`;
+  }
+
+  function updatePDFFrame(cv, source) {
     const current = document.getElementById("pdf-frame");
     const frame = document.createElement("iframe");
     frame.id = "pdf-frame";
     frame.title = `ERP CV${cv} PDF preview`;
-    if (signature) frame.src = `/pdf/file/cv${cv}?v=${encodeURIComponent(signature)}&reload=${Date.now()}`;
+    if (source) frame.src = source;
     current.replaceWith(frame);
   }
 
   function setupPDFResizer() {
+    const layout = document.getElementById("editor-layout");
     const column = document.getElementById("pdf-column");
     const handle = document.getElementById("pdf-resizer");
-    const minimum = 280;
-    const defaultWidth = 380;
-    const storageKey = "cvpp.pdf-preview-width";
+    const minimum = 320;
+    const minimumEditorWidth = 420;
+    const storageKey = "cvpp.pdf-preview-width-v2";
     let startX = 0;
-    let startWidth = defaultWidth;
+    let startWidth = 0;
 
     function maximumWidth() {
-      return Math.max(minimum, Math.min(900, window.innerWidth - 540));
+      return Math.max(minimum, layout.clientWidth - minimumEditorWidth - handle.offsetWidth);
+    }
+
+    function defaultWidth() {
+      return Math.min(maximumWidth(), Math.max(minimum, Math.round(layout.clientWidth * 0.46)));
     }
 
     function setWidth(value, persist) {
-      const width = Math.round(Math.min(maximumWidth(), Math.max(minimum, Number(value) || defaultWidth)));
-      column.style.width = `${width}px`;
+      const width = Math.round(Math.min(maximumWidth(), Math.max(minimum, Number(value) || defaultWidth())));
+      layout.style.setProperty("--pdf-preview-width", `${width}px`);
       handle.setAttribute("aria-valuemax", String(maximumWidth()));
       handle.setAttribute("aria-valuenow", String(width));
       if (persist) {
@@ -980,15 +992,15 @@
 
     try {
       const savedWidth = Number(localStorage.getItem(storageKey));
-      if (savedWidth) setWidth(savedWidth, false);
+      setWidth(savedWidth || defaultWidth(), false);
     } catch (_) {}
 
     handle.addEventListener("pointerdown", (event) => {
-      if (window.matchMedia("(max-width: 1300px)").matches) return;
+      if (window.matchMedia("(max-width: 900px)").matches) return;
       startX = event.clientX;
       startWidth = column.getBoundingClientRect().width;
       handle.setPointerCapture(event.pointerId);
-      column.classList.add("is-resizing");
+      layout.classList.add("is-resizing");
       document.body.classList.add("pdf-resizing");
       event.preventDefault();
     });
@@ -999,13 +1011,13 @@
     function finishResize(event) {
       if (!handle.hasPointerCapture(event.pointerId)) return;
       handle.releasePointerCapture(event.pointerId);
-      column.classList.remove("is-resizing");
+      layout.classList.remove("is-resizing");
       document.body.classList.remove("pdf-resizing");
       setWidth(column.getBoundingClientRect().width, true);
     }
     handle.addEventListener("pointerup", finishResize);
     handle.addEventListener("pointercancel", finishResize);
-    handle.addEventListener("dblclick", () => setWidth(defaultWidth, true));
+    handle.addEventListener("dblclick", () => setWidth(defaultWidth(), true));
     handle.addEventListener("keydown", (event) => {
       const currentWidth = column.getBoundingClientRect().width;
       let nextWidth = currentWidth;
@@ -1018,7 +1030,7 @@
       setWidth(nextWidth, true);
     });
     window.addEventListener("resize", () => {
-      if (!window.matchMedia("(max-width: 1300px)").matches) setWidth(column.getBoundingClientRect().width, false);
+      if (!window.matchMedia("(max-width: 900px)").matches) setWidth(column.getBoundingClientRect().width, false);
     });
   }
 
@@ -1200,7 +1212,7 @@
         showSetup(false);
         showOTPPrompt(false);
         loadServerResume();
-        refreshPDF();
+        refreshPDF(true);
       } else {
         if (payload.error) appendERPLog(`error: ${payload.error}`);
         if (payload.error && payload.error.toLowerCase().includes("security question")) {

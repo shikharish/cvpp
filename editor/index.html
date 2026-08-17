@@ -86,11 +86,13 @@
         </details>
       </aside>
 
-      <main id="workspace" class="workspace" tabindex="-1"></main>
-      <aside id="pdf-column" class="pdf-column" hidden>
-        <div id="pdf-resizer" class="pdf-resizer" role="separator" aria-label="Resize ERP PDF preview" aria-controls="pdf-panel" aria-orientation="vertical" aria-valuemin="280" aria-valuenow="380" tabindex="0" title="Drag to resize the PDF preview width"></div>
-        <div id="pdf-panel" class="pdf-panel"><div class="pdf-panel-header"><strong id="pdf-title">ERP PDF · CV1</strong><span id="pdf-state">No PDF downloaded yet</span></div><iframe id="pdf-frame" title="ERP CV1 PDF preview"></iframe></div>
-      </aside>
+      <div id="editor-layout" class="editor-layout">
+        <main id="workspace" class="workspace" tabindex="-1"></main>
+        <div id="pdf-resizer" class="pdf-resizer" role="separator" aria-label="Resize ERP PDF preview" aria-controls="pdf-panel" aria-orientation="vertical" aria-valuemin="320" aria-valuenow="480" tabindex="0" title="Drag to resize the PDF preview width" hidden></div>
+        <aside id="pdf-column" class="pdf-column" hidden>
+          <div id="pdf-panel" class="pdf-panel"><div class="pdf-panel-header"><strong id="pdf-title">ERP PDF · CV1</strong><span id="pdf-state">No PDF downloaded yet</span></div><iframe id="pdf-frame" title="ERP CV1 PDF preview"></iframe></div>
+        </aside>
+      </div>
     </div>
 
     <input id="json-file-input" type="file" accept="application/json,.json" hidden>

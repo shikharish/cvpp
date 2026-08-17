@@ -6,11 +6,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"cvpp/internal/appdata"
 	"cvpp/internal/erp"
 )
 
@@ -130,5 +133,60 @@ func TestFriendlyErrorDoesNotGuessSessionExpiry(t *testing.T) {
 	want := "ERP did not keep this login active. Try again with the newest OTP. Your local resume was not changed."
 	if got := friendlyError(erp.ErrSessionRejected); got != want {
 		t.Fatalf("friendlyError(session rejection) = %q, want %q", got, want)
+	}
+}
+
+func TestPDFViewerUsesNonceAndVersionedLocalFile(t *testing.T) {
+	server := &Server{}
+	request := httptest.NewRequest(http.MethodGet, "/pdf/cv1", nil)
+	response := httptest.NewRecorder()
+	server.handlePDFViewer(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("viewer status = %d", response.Code)
+	}
+	body := response.Body.String()
+	csp := response.Header().Get("Content-Security-Policy")
+	marker := "script-src 'nonce-"
+	start := strings.Index(csp, marker)
+	if start < 0 {
+		t.Fatalf("viewer CSP has no script nonce: %q", csp)
+	}
+	start += len(marker)
+	end := strings.Index(csp[start:], "'")
+	if end < 0 {
+		t.Fatalf("viewer CSP has an invalid script nonce: %q", csp)
+	}
+	nonce := csp[start : start+end]
+	if strings.Count(body, `nonce="`+nonce+`"`) != 2 {
+		t.Fatal("viewer style and script must use the CSP nonce")
+	}
+	if !strings.Contains(csp, "frame-src 'self'") || !strings.Contains(body, `fileURL + "/" + encodeURIComponent(signature)`) {
+		t.Fatal("viewer must render the versioned local PDF file")
+	}
+	if strings.Contains(body, "toolbar=0") {
+		t.Fatal("viewer must keep the browser PDF toolbar")
+	}
+}
+
+func TestVersionedPDFPathSelectsCV(t *testing.T) {
+	variant, err := cvFromPath("/pdf/file/cv2/123:456/789", "/pdf/file/cv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if variant != 2 {
+		t.Fatalf("variant = %d, want 2", variant)
+	}
+}
+
+func TestAppModeERPAndPreviewSharePDFPath(t *testing.T) {
+	paths, err := appdata.Resolve(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{options: Options{AppMode: true}, paths: paths}
+	want := filepath.Join(paths.PDFDir, "resume-erp-cv1.pdf")
+	if got := server.pdfPath(1); got != want {
+		t.Fatalf("PDF path = %q, want %q", got, want)
 	}
 }
