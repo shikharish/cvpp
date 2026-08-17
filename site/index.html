@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CV++ — increment your resume locally, then update IIT KGP ERP when you are ready.">
-  <title>CV++ — increment your resume</title>
+  <meta name="description" content="A private, local desktop editor for IIT Kharagpur ERP resumes.">
+  <title>CV++</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="hero">
     <nav><a class="brand" href="./">CV++</a><div><a href="#privacy">Privacy</a><a href="https://github.com/shikharish/cvpp/issues">Issues</a><a href="https://github.com/shikharish/cvpp">Source</a></div></nav>
-    <div class="hero-copy"><p class="eyebrow">IIT Kharagpur · local-first</p><h1>Increment your resume.</h1><p>Edit comfortably on your computer, keep your data private, and update ERP only when you press the button.</p><a class="download primary-download" id="recommended-download" href="https://github.com/shikharish/cvpp/releases/latest">Download CV++</a><small id="os-note">Choose your platform below.</small></div>
+    <div class="hero-copy"><p class="eyebrow">IIT Kharagpur · local-first</p><h1>Your ERP resume, edited locally.</h1><p>Edit comfortably on your computer, keep your data private, and update ERP only when you press the button.</p><a class="download primary-download" id="recommended-download" href="https://github.com/shikharish/cvpp/releases/latest">Download CV++</a><small id="os-note">Choose your platform below.</small></div>
   </header>
   <main>
     <section class="downloads" id="downloads"><div class="section-heading"><p class="eyebrow">Portable releases</p><h2>One download. Double-click. Start editing.</h2></div><div class="download-grid"><a class="download-card" data-os="windows" href="https://github.com/shikharish/cvpp/releases/latest/download/CV++-windows-amd64.zip"><strong>Windows</strong><span>AMD64 ZIP · CV++.exe</span></a><a class="download-card" data-os="mac-arm" href="https://github.com/shikharish/cvpp/releases/latest/download/CV++-darwin-arm64.zip"><strong>macOS Apple Silicon</strong><span>ARM64 application ZIP</span></a><a class="download-card" data-os="mac-intel" href="https://github.com/shikharish/cvpp/releases/latest/download/CV++-darwin-amd64.zip"><strong>macOS Intel</strong><span>AMD64 application ZIP</span></a><a class="download-card" data-os="linux" href="https://github.com/shikharish/cvpp/releases/latest/download/CV++-linux-amd64.AppImage"><strong>Linux</strong><span>AMD64 AppImage</span></a></div><p class="checksum">Every release includes SHA-256 checksums and reproducible build metadata.</p></section>
     <section class="steps"><div class="section-heading"><p class="eyebrow">The workflow</p><h2>Four calm steps.</h2></div><div class="step-grid"><article><b>01</b><h3>Download</h3><p>Pick your platform and open CV++ locally.</p></article><article><b>02</b><h3>Log in</h3><p>Enter ERP credentials in the private wizard and type the emailed OTP.</p></article><article><b>03</b><h3>Edit</h3><p>Your current ERP resume is imported without changing the portal. Autosave stays local.</p></article><article><b>04</b><h3>Update</h3><p>Press <strong>Update ERP Resume</strong> when you explicitly want to sync.</p></article></div></section>
     <section class="privacy" id="privacy"><div><p class="eyebrow">Private by default</p><h2>Your resume stays with you.</h2><p>CV++ has no hosted backend, telemetry, analytics, credential form, or localhost bridge on this website. Credentials, sessions, resume content, backups, and ERP PDFs remain on your computer; the local app talks directly to IIT KGP ERP.</p></div><div class="privacy-box"><strong>Unsigned releases</strong><p>Windows SmartScreen or macOS Gatekeeper may ask for a one-time confirmation. Only use files from the official release page.</p></div></section>
   </main>
-  <footer><span>CV++ — increment your resume</span><span><a href="https://github.com/shikharish/cvpp">Source</a> · <a href="https://github.com/shikharish/cvpp/issues">Issues</a> · <a href="https://github.com/shikharish/cvpp/blob/main/cvpp/docs/advanced-cli.md">Advanced CLI</a> · <a href="https://github.com/shikharish/cvpp/blob/main/cvpp/LICENSE">MIT License</a></span></footer>
+  <footer><span>CV++</span><span><a href="https://github.com/shikharish/cvpp">Source</a> · <a href="https://github.com/shikharish/cvpp/issues">Issues</a> · <a href="https://github.com/shikharish/cvpp/blob/main/docs/advanced-cli.md">Advanced CLI</a> · <a href="https://github.com/shikharish/cvpp/blob/main/LICENSE">MIT License</a></span></footer>
   <script>
     const ua = navigator.userAgent.toLowerCase();
     const target = ua.includes('windows') ? 'windows' : ua.includes('mac') ? ((navigator.maxTouchPoints > 1 || ua.includes('arm64')) ? 'mac-arm' : 'mac-intel') : ua.includes('linux') ? 'linux' : '';
