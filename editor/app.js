@@ -24,6 +24,8 @@
   let erpStreamWarned = false;
   let autosaveTimer = null;
   let pdfSignature = "";
+  let pdfVariant = 0;
+  let pdfRequestSequence = 0;
   let setupStatusTimer = null;
   let setupStatusRequest = null;
   let setupJobID = 0;
@@ -897,8 +899,10 @@
     document.getElementById("open-pdf-viewer").addEventListener("click", openPDFViewer);
     document.getElementById("open-erp").addEventListener("click", openERPFromEditor);
     document.getElementById("run-erp").addEventListener("click", runERPFromEditor);
+    document.getElementById("erp-cv").addEventListener("change", () => { refreshPDF(); });
     document.getElementById("forget-login").addEventListener("click", forgetLogin);
     document.getElementById("quit-app").addEventListener("click", quitApp);
+    setupPDFResizer();
     connectERPEvents();
     refreshPDF();
     setInterval(refreshPDF, 1200);
@@ -919,17 +923,103 @@
 
   async function refreshPDF() {
     if (!serverMode) return;
+    const cv = Number(document.getElementById("erp-cv").value) || 1;
+    const requestSequence = ++pdfRequestSequence;
+    if (cv !== pdfVariant) {
+      pdfVariant = cv;
+      pdfSignature = "";
+      updatePDFFrame(cv, "");
+    }
+    document.getElementById("pdf-title").textContent = `ERP PDF · CV${cv}`;
     try {
-      const response = await apiFetch("/api/pdf/status?cv=1");
+      const response = await apiFetch(`/api/pdf/status?cv=${cv}`, { cache: "no-store" });
       const payload = await response.json();
-      const state = document.getElementById("pdf-state");
-      if (!payload.exists) { state.textContent = "No PDF downloaded yet"; return; }
-      state.textContent = `Updated ${new Date(payload.modTime).toLocaleTimeString()}`;
-      if (payload.signature && payload.signature !== pdfSignature) {
-        pdfSignature = payload.signature;
-        document.getElementById("pdf-frame").src = `/pdf/file/cv1?v=${encodeURIComponent(pdfSignature)}`;
+      if (requestSequence !== pdfRequestSequence || cv !== pdfVariant) return;
+      const pdfState = document.getElementById("pdf-state");
+      if (!payload.exists) { pdfState.textContent = "No PDF downloaded yet"; return; }
+      pdfState.textContent = `Updated ${new Date(payload.modTime).toLocaleTimeString()}`;
+      const signature = payload.signature || `${payload.modTime}:${payload.size}`;
+      if (signature && signature !== pdfSignature) {
+        pdfSignature = signature;
+        updatePDFFrame(cv, signature);
       }
     } catch (_) { document.getElementById("pdf-state").textContent = "PDF unavailable"; }
+  }
+
+  function updatePDFFrame(cv, signature) {
+    const current = document.getElementById("pdf-frame");
+    const frame = document.createElement("iframe");
+    frame.id = "pdf-frame";
+    frame.title = `ERP CV${cv} PDF preview`;
+    if (signature) frame.src = `/pdf/file/cv${cv}?v=${encodeURIComponent(signature)}&reload=${Date.now()}`;
+    current.replaceWith(frame);
+  }
+
+  function setupPDFResizer() {
+    const column = document.getElementById("pdf-column");
+    const handle = document.getElementById("pdf-resizer");
+    const minimum = 280;
+    const defaultWidth = 380;
+    const storageKey = "cvpp.pdf-preview-width";
+    let startX = 0;
+    let startWidth = defaultWidth;
+
+    function maximumWidth() {
+      return Math.max(minimum, Math.min(900, window.innerWidth - 540));
+    }
+
+    function setWidth(value, persist) {
+      const width = Math.round(Math.min(maximumWidth(), Math.max(minimum, Number(value) || defaultWidth)));
+      column.style.width = `${width}px`;
+      handle.setAttribute("aria-valuemax", String(maximumWidth()));
+      handle.setAttribute("aria-valuenow", String(width));
+      if (persist) {
+        try { localStorage.setItem(storageKey, String(width)); } catch (_) {}
+      }
+    }
+
+    try {
+      const savedWidth = Number(localStorage.getItem(storageKey));
+      if (savedWidth) setWidth(savedWidth, false);
+    } catch (_) {}
+
+    handle.addEventListener("pointerdown", (event) => {
+      if (window.matchMedia("(max-width: 1300px)").matches) return;
+      startX = event.clientX;
+      startWidth = column.getBoundingClientRect().width;
+      handle.setPointerCapture(event.pointerId);
+      column.classList.add("is-resizing");
+      document.body.classList.add("pdf-resizing");
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!handle.hasPointerCapture(event.pointerId)) return;
+      setWidth(startWidth + startX - event.clientX, false);
+    });
+    function finishResize(event) {
+      if (!handle.hasPointerCapture(event.pointerId)) return;
+      handle.releasePointerCapture(event.pointerId);
+      column.classList.remove("is-resizing");
+      document.body.classList.remove("pdf-resizing");
+      setWidth(column.getBoundingClientRect().width, true);
+    }
+    handle.addEventListener("pointerup", finishResize);
+    handle.addEventListener("pointercancel", finishResize);
+    handle.addEventListener("dblclick", () => setWidth(defaultWidth, true));
+    handle.addEventListener("keydown", (event) => {
+      const currentWidth = column.getBoundingClientRect().width;
+      let nextWidth = currentWidth;
+      if (event.key === "ArrowLeft") nextWidth += 20;
+      else if (event.key === "ArrowRight") nextWidth -= 20;
+      else if (event.key === "Home") nextWidth = minimum;
+      else if (event.key === "End") nextWidth = maximumWidth();
+      else return;
+      event.preventDefault();
+      setWidth(nextWidth, true);
+    });
+    window.addEventListener("resize", () => {
+      if (!window.matchMedia("(max-width: 1300px)").matches) setWidth(column.getBoundingClientRect().width, false);
+    });
   }
 
   function showSetup(show) {
@@ -1110,6 +1200,7 @@
         showSetup(false);
         showOTPPrompt(false);
         loadServerResume();
+        refreshPDF();
       } else {
         if (payload.error) appendERPLog(`error: ${payload.error}`);
         if (payload.error && payload.error.toLowerCase().includes("security question")) {
@@ -1149,8 +1240,10 @@
     erpRunning = running;
     const runButton = document.getElementById("run-erp");
     const openButton = document.getElementById("open-erp");
+    const cvSelect = document.getElementById("erp-cv");
     runButton.disabled = running;
     openButton.disabled = running;
+    cvSelect.disabled = running;
     runButton.textContent = running ? "Updating ERP…" : "Update ERP Resume";
     openButton.textContent = running ? "Opening ERP…" : "Open ERP";
   }

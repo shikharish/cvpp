@@ -600,7 +600,7 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
         const signature = payload.signature || (payload.modTime + ":" + payload.size);
         if (signature !== currentSignature) {
           currentSignature = signature;
-          frame.src = fileURL + "&v=" + encodeURIComponent(signature);
+          frame.src = fileURL + "?v=" + encodeURIComponent(signature) + "&reload=" + Date.now();
         }
         const updated = payload.modTime ? new Date(payload.modTime).toLocaleTimeString() : "unknown time";
         status.textContent = "Watching " + payload.path + " · " + payload.size + " bytes · updated " + updated;
