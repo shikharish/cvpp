@@ -7,7 +7,7 @@ A local desktop editor for IIT Kharagpur ERP resumes. CV++ imports your existing
 Download the latest build from [GitHub Releases](https://github.com/shikharish/cvpp/releases/latest), unzip it, and open CV++.
 
 - Windows: `CV++.exe`
-- macOS: choose the Apple Silicon or Intel build
+- macOS: Apple Silicon
 - Linux: `CV++-linux-amd64.AppImage`
 
 ### First launch warnings

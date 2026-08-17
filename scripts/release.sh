@@ -18,7 +18,7 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -H=wi
 build windows amd64 "$DIST/build/windows/cvpp.exe"
 (cd "$DIST/build/windows" && zip -q -r "$DIST/CV++-windows-amd64.zip" .)
 
-for arch in amd64 arm64; do
+for arch in arm64; do
   build darwin "$arch" "$DIST/build/cvpp-darwin-$arch"
   APP_DIR="$DIST/build/cvpp-$arch.app"
   mkdir -p "$APP_DIR/Contents/MacOS"
@@ -27,7 +27,7 @@ for arch in amd64 arm64; do
 <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>CV++</string><key>CFBundleIdentifier</key><string>org.cvpp.app</string><key>CFBundleName</key><string>CV++</string><key>CFBundleVersion</key><string>$VERSION</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>
 PLIST
   mv "$APP_DIR" "$DIST/build/CV++.app"
-  (cd "$DIST/build" && zip -q -r "$DIST/CV++-darwin-$arch.zip" "CV++.app")
+  (cd "$DIST/build" && zip -q -r "$DIST/CV++-macos-$arch.zip" "CV++.app")
   rm -rf "$DIST/build/CV++.app"
 done
 
