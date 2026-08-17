@@ -19,7 +19,7 @@ cd erp-cv-portal
 ./scripts/setup.sh
 ```
 
-The setup script does the required local setup:
+Use the setup script. It is the supported setup path and does the required local setup:
 
 - creates `data/resume.json`
 - creates `.erp-cv-secrets/erpcreds.json`
@@ -29,6 +29,12 @@ The setup script does the required local setup:
 - builds `./erp-cv-portal`
 
 If setup cannot fetch the security question automatically, it will ask you to type the question text manually. The text must match ERP exactly. If ERP later reports a different question, run setup again and add that question too.
+
+If setup fails or your ERP credentials change, run it again:
+
+```sh
+./scripts/setup.sh
+```
 
 ## Recommended workflow
 
@@ -75,47 +81,6 @@ data/resume.json
 ```
 
 Hidden entries and hidden bullet points remain in JSON but are skipped during ERP sync.
-
-## Advanced commands
-
-Most students should only need the recommended workflow above.
-
-Manual one-time sync:
-
-```sh
-./erp-cv-portal erp --cv 1
-```
-
-Other CV variants:
-
-```sh
-./erp-cv-portal erp --cv 2
-./erp-cv-portal erp --cv 3
-```
-
-Download the currently saved ERP PDF without syncing JSON:
-
-```sh
-./erp-cv-portal erp --download-only --cv 1
-```
-
-Force a new ERP login:
-
-```sh
-./erp-cv-portal erp --fresh-login --cv 1
-```
-
-Open ERP in the browser:
-
-```sh
-./erp-cv-portal erp --open
-```
-
-## Optional Gmail OTP automation
-
-Manual OTP is the default and recommended setup.
-
-If `.erp-cv-secrets/client_secret.json` and `.erp-cv-secrets/.token` exist, the tool will try to read the OTP from Gmail automatically. If that fails, it falls back to manual OTP entry.
 
 ## Safety
 
