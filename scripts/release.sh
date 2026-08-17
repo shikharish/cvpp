@@ -43,7 +43,6 @@ cat > "$DIST/build/AppDir/cvpp.desktop" <<'DESKTOP'
 Type=Application
 Name=CV++
 Exec=cvpp
-Icon=cvpp
 Categories=Utility;
 DESKTOP
 cat > "$DIST/build/AppDir/AppRun" <<'APP'
