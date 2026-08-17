@@ -7,8 +7,7 @@
   const snapshotInput = document.getElementById("snapshot-file-input");
   const dialog = document.getElementById("message-dialog");
   const toast = document.getElementById("toast");
-  const serverToken = new URLSearchParams(window.location.search).get("token") || "";
-  const serverMode = Boolean(serverToken && /^https?:$/.test(window.location.protocol));
+  const serverMode = Boolean(/^https?:$/.test(window.location.protocol) && /^(127\.0\.0\.1|localhost)$/.test(window.location.hostname));
 
   let state = Core.emptyResume();
   let currentView = "entries";
@@ -23,6 +22,12 @@
   let erpRunning = false;
   let erpEventSource = null;
   let erpStreamWarned = false;
+  let autosaveTimer = null;
+  let pdfSignature = "";
+  let setupStatusTimer = null;
+  let setupStatusRequest = null;
+  let setupJobID = 0;
+  let handledSetupJobID = 0;
   const savedSelections = new WeakMap();
   const blockEditorSync = new WeakMap();
   const inlineEditorSync = new WeakMap();
@@ -75,13 +80,11 @@
   }
 
   function apiURL(path) {
-    const separator = path.includes("?") ? "&" : "?";
-    return `${path}${separator}token=${encodeURIComponent(serverToken)}`;
+    return path;
   }
 
   async function apiFetch(path, options) {
     const request = Object.assign({}, options || {});
-    request.headers = Object.assign({}, request.headers || {}, { "X-Resume-Editor-Token": serverToken });
     const response = await fetch(apiURL(path), request);
     if (!response.ok) {
       let message = `${response.status} ${response.statusText}`;
@@ -135,6 +138,22 @@
     storeDraft();
     updateChrome();
     if (renderPreview && currentView === "preview") render();
+    scheduleAutosave();
+  }
+
+  function scheduleAutosave() {
+    if (!serverMode) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(async () => {
+      flushVisibleEditors(true);
+      const result = Core.validateResume(state);
+      if (!result.valid) { storeDraft(); updateChrome(); return; }
+      try {
+        await apiFetch("/api/resume", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result.data, null, 2) + "\n" });
+        markSaved();
+        showToast("Saved locally.");
+      } catch (_) { storeDraft(); }
+    }, 750);
   }
 
   function markSaved() {
@@ -874,10 +893,182 @@
   function setupServerMode() {
     const panel = document.getElementById("server-panel");
     panel.hidden = false;
+    document.getElementById("pdf-column").hidden = false;
     document.getElementById("open-pdf-viewer").addEventListener("click", openPDFViewer);
     document.getElementById("open-erp").addEventListener("click", openERPFromEditor);
     document.getElementById("run-erp").addEventListener("click", runERPFromEditor);
+    document.getElementById("forget-login").addEventListener("click", forgetLogin);
+    document.getElementById("quit-app").addEventListener("click", quitApp);
     connectERPEvents();
+    refreshPDF();
+    setInterval(refreshPDF, 1200);
+    refreshSetupStatus();
+    setupStatusTimer = setInterval(refreshSetupStatus, 1000);
+  }
+
+  async function forgetLogin() {
+    if (!window.confirm("Forget the ERP credentials and session? Your local resume will remain.")) return;
+    try { await apiFetch("/api/setup/credentials", { method: "DELETE" }); showSetup(true); showToast("ERP login forgotten. Resume content is preserved."); }
+    catch (error) { showDialog("Could not forget ERP login", `<p>${escapeHtml(error.message || error)}</p>`); }
+  }
+
+  async function quitApp() {
+    try { await apiFetch("/api/app/shutdown", { method: "POST" }); showToast("CV++ is shutting down."); }
+    catch (error) { showDialog("Could not quit CV++", `<p>${escapeHtml(error.message || error)}</p>`); }
+  }
+
+  async function refreshPDF() {
+    if (!serverMode) return;
+    try {
+      const response = await apiFetch("/api/pdf/status?cv=1");
+      const payload = await response.json();
+      const state = document.getElementById("pdf-state");
+      if (!payload.exists) { state.textContent = "No PDF downloaded yet"; return; }
+      state.textContent = `Updated ${new Date(payload.modTime).toLocaleTimeString()}`;
+      if (payload.signature && payload.signature !== pdfSignature) {
+        pdfSignature = payload.signature;
+        document.getElementById("pdf-frame").src = `/pdf/file/cv1?v=${encodeURIComponent(pdfSignature)}`;
+      }
+    } catch (_) { document.getElementById("pdf-state").textContent = "PDF unavailable"; }
+  }
+
+  function showSetup(show) {
+    const overlay = document.getElementById("setup-overlay");
+    overlay.hidden = !show;
+    document.querySelector(".app-shell").classList.toggle("setup-blocked", show);
+  }
+
+  function setSetupError(message) {
+    const target = document.getElementById("setup-error");
+    target.textContent = message || "";
+    target.hidden = !message;
+  }
+
+  async function fetchSetupQuestion() {
+    setSetupError("");
+    const roll = document.getElementById("setup-roll").value.trim();
+    if (!roll) { setSetupError("Enter your roll number first."); return; }
+    const button = document.getElementById("fetch-question");
+    button.disabled = true;
+    try {
+      const response = await apiFetch("/api/setup/security-question", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rollNumber: roll }) });
+      const payload = await response.json();
+      document.getElementById("setup-question").value = payload.question || "";
+    } catch (error) {
+      document.getElementById("setup-question").readOnly = false;
+      document.getElementById("setup-manual-question").checked = true;
+      setSetupError(error.message || "ERP could not provide the question. Enter it manually.");
+    }
+    button.disabled = false;
+  }
+
+  async function submitSetup(event) {
+    event.preventDefault();
+    setSetupError("");
+    const roll = document.getElementById("setup-roll").value.trim();
+    const password = document.getElementById("setup-password").value;
+    const question = document.getElementById("setup-question").value.trim();
+    const answer = document.getElementById("setup-answer").value;
+    if (!roll || !password || !question || !answer) { setSetupError("Complete all ERP login fields."); return; }
+    setSetupWaiting(true);
+    try {
+      await apiFetch("/api/setup/credentials", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roll_number: roll, password, answers: { [question]: answer } }) });
+      const response = await apiFetch("/api/setup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ freshLogin: true }) });
+      const payload = await response.json();
+      setupJobID = Number(payload.jobID) || 0;
+      showToast("Connecting to ERP…");
+    } catch (error) {
+      setSetupWaiting(false);
+      setSetupError(error.message || "Could not start ERP import.");
+    }
+  }
+
+  async function submitOTP(event) {
+    event.preventDefault();
+    setSetupError("");
+    const input = document.getElementById("setup-otp");
+    const button = document.querySelector("#otp-form button[type=\"submit\"]");
+    input.disabled = true;
+    button.disabled = true;
+    try {
+      await apiFetch("/api/erp/otp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ otp: input.value.trim() }) });
+      document.getElementById("otp-panel").hidden = true;
+      showToast("OTP accepted. Finishing import…");
+    } catch (error) {
+      input.disabled = false;
+      button.disabled = false;
+      setSetupError(error.message || "That OTP was not accepted.");
+    }
+  }
+
+  function setSetupWaiting(waiting) {
+    const form = document.getElementById("setup-form");
+    form.classList.toggle("is-waiting", waiting);
+    form.querySelectorAll("input, button").forEach((element) => {
+      if (element.id !== "restore-backup") element.disabled = waiting;
+    });
+    if (!waiting) {
+      document.getElementById("setup-otp").disabled = false;
+      document.querySelector("#otp-form button[type=\"submit\"]").disabled = false;
+    }
+  }
+
+  async function finishSetupJob(job) {
+    const jobID = Number(job.id || job.jobID) || 0;
+    if (jobID && handledSetupJobID === jobID) return;
+    if (jobID) handledSetupJobID = jobID;
+    setupJobID = 0;
+    setSetupWaiting(false);
+    document.getElementById("otp-panel").hidden = true;
+    if (!job.ok) {
+      const message = job.error || "ERP import failed. Your local resume was not changed.";
+      showSetup(true);
+      setSetupError(message);
+      if (message.toLowerCase().includes("security question")) {
+        document.getElementById("setup-question").readOnly = false;
+        document.getElementById("setup-manual-question").checked = true;
+      }
+      return;
+    }
+    setSetupError("");
+    showSetup(false);
+    document.getElementById("setup-password").value = "";
+    document.getElementById("setup-answer").value = "";
+    document.getElementById("setup-otp").value = "";
+    await loadServerResume();
+    refreshPDF();
+    showToast(job.message || "ERP resume imported without changing the portal.");
+  }
+
+  async function refreshSetupStatus() {
+    if (!serverMode) return;
+    if (setupStatusRequest) return setupStatusRequest;
+    setupStatusRequest = (async () => {
+      try {
+        const response = await apiFetch("/api/app/status");
+        const status = await response.json();
+        const job = status.job || {};
+        const jobID = Number(job.id) || 0;
+        if (!setupJobID && job.kind === "import" && jobID !== handledSetupJobID && (job.running || (job.completed && status.onboarding))) {
+          setupJobID = jobID;
+        }
+        const isSetupJob = setupJobID && jobID === setupJobID && job.kind === "import";
+        if (isSetupJob && job.completed) {
+          await finishSetupJob(job);
+          return;
+        }
+        const waitingForStart = document.getElementById("setup-form").classList.contains("is-waiting") && !setupJobID;
+        const shouldShow = Boolean(status.onboarding || status.otpRequired || waitingForStart || (isSetupJob && job.running));
+        showSetup(shouldShow);
+        document.getElementById("otp-panel").hidden = !status.otpRequired;
+        if (isSetupJob && job.running) setSetupWaiting(true);
+      } catch (_) {
+        // The event stream and the next poll can recover from a transient request failure.
+      } finally {
+        setupStatusRequest = null;
+      }
+    })();
+    return setupStatusRequest;
   }
 
   function connectERPEvents() {
@@ -897,13 +1088,32 @@
     erpEventSource.addEventListener("done", (event) => {
       const payload = JSON.parse(event.data || "{}");
       setERPRunning(false);
+      const eventJobID = Number(payload.jobID) || 0;
+      if (eventJobID && eventJobID === handledSetupJobID) return;
+      if (setupJobID && eventJobID === setupJobID) {
+        finishSetupJob(payload);
+        return;
+      }
       if (payload.ok) {
         if (payload.message) appendERPLog(payload.message);
         showToast(payload.message || "ERP PDF saved.");
+        showSetup(false);
+        document.getElementById("otp-panel").hidden = true;
+        loadServerResume();
       } else {
         if (payload.error) appendERPLog(`error: ${payload.error}`);
+        if (payload.error && payload.error.toLowerCase().includes("security question")) {
+          showSetup(true);
+          document.getElementById("setup-question").readOnly = false;
+          document.getElementById("setup-manual-question").checked = true;
+        }
         showDialog("ERP run failed", `<p>${escapeHtml(payload.error || "Unknown ERP error")}</p>`);
       }
+    });
+    erpEventSource.addEventListener("phase", (event) => {
+      const payload = JSON.parse(event.data || "{}");
+      if (payload.phase === "otp-required") document.getElementById("otp-panel").hidden = false;
+      appendERPLog(payload.phase || "");
     });
     erpEventSource.addEventListener("error", () => {
       if (erpStreamWarned) return;
@@ -931,7 +1141,7 @@
     const openButton = document.getElementById("open-erp");
     runButton.disabled = running;
     openButton.disabled = running;
-    runButton.textContent = running ? "Running ERP…" : "Sync + download PDF";
+    runButton.textContent = running ? "Updating ERP…" : "Update ERP Resume";
     openButton.textContent = running ? "Opening ERP…" : "Open ERP";
   }
 
@@ -1002,6 +1212,11 @@
   document.getElementById("import-snapshot").addEventListener("click", () => { snapshotInput.value = ""; snapshotInput.click(); });
   jsonInput.addEventListener("change", () => { if (jsonInput.files[0]) loadJsonFile(jsonInput.files[0]); });
   snapshotInput.addEventListener("change", () => { if (snapshotInput.files[0]) importSnapshot(snapshotInput.files[0]); });
+  document.getElementById("fetch-question").addEventListener("click", fetchSetupQuestion);
+  document.getElementById("setup-manual-question").addEventListener("change", (event) => { document.getElementById("setup-question").readOnly = !event.target.checked; });
+  document.getElementById("setup-form").addEventListener("submit", submitSetup);
+  document.getElementById("otp-form").addEventListener("submit", submitOTP);
+  document.getElementById("restore-backup").addEventListener("click", () => { showSetup(false); openJson(); });
 
   window.addEventListener("beforeunload", (event) => {
     if (!dirty) return;
@@ -1015,6 +1230,7 @@
       updateChrome();
       render();
       await loadServerResume();
+      await refreshSetupStatus();
       return;
     }
     try {

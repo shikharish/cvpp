@@ -1,95 +1,45 @@
-# CV++
+# CV++ — increment your resume
 
-A local editor and CLI for maintaining IIT Kharagpur ERP CV data in JSON, syncing it to the CDC resume portal, and downloading the portal-generated PDF.
+CV++ is a local-first resume workspace for the IIT Kharagpur ERP portal. Download the latest release, double-click the application, and follow the browser setup wizard. You do not need Git, Go, a terminal, or knowledge of JSON.
 
-Your ERP credentials, session, resume JSON, and generated PDFs stay on your machine and are ignored by git.
+## Private by design
 
-## Requirements
+Your ERP roll number, password, security answers, session, resume content, recovery backups, and generated PDFs stay on your computer under the CV++ user configuration directory. The local Go process sends credentials directly to IIT KGP ERP. CV++ has no hosted backend, telemetry, analytics, or automatic upload.
 
-- Go installed
-- IIT KGP ERP access
-- Access to the email OTP sent by ERP
-- A browser for the local editor
+## The four-step workflow
 
-## Setup
+1. Download the release for Windows, macOS Apple Silicon/Intel, or Linux from the [CV++ Releases](https://github.com/shikharish/cvpp/releases/latest) page.
+2. Double-click CV++ and enter your ERP login in the local wizard. The emailed OTP is entered in the browser.
+3. CV++ imports the current `StudentForm.jsp` without posting resume fields. Edit with local autosave and see the current CV1 PDF beside the workspace.
+4. Press **Update ERP Resume** when you explicitly want to synchronize ERP. The PDF refreshes automatically after a successful download.
 
-```sh
-git clone <repo-url>
-cd cvpp
-./scripts/setup.sh
-```
+The first import is download-only with respect to resume fields. A timestamped backup is created before replacing an existing local JSON file. Failed imports leave the existing local resume untouched.
 
-Use the setup script. It is the supported setup path and does the required local setup:
+## Local data layout
 
-- creates `data/resume.json`
-- creates `.erp-cv-secrets/erpcreds.json`
-- asks for your ERP roll number and password
-- fetches your current ERP security question when possible
-- asks for the security-question answer
-- builds `./cvpp`
+CV++ uses `os.UserConfigDir()/cvpp` (for example, `%AppData%/cvpp` on Windows and `~/Library/Application Support/cvpp` on macOS):
 
-If setup cannot fetch the security question automatically, it will ask you to type the question text manually. The text must match ERP exactly. If ERP later reports a different question, run setup again and add that question too.
+- `data/resume.json` — canonical local resume
+- `secrets/erpcreds.json` and `secrets/.session` — permission-restricted credentials/session
+- `pdf/resume-erp-cv1.pdf` through `cv3` — local portal PDFs
+- `backups/` — timestamped resume recovery copies
+- `runtime/` and `logs/` — short-lived local process state and diagnostics
 
-If setup fails or your ERP credentials change, run it again:
+Use **Forget ERP login** in Advanced and privacy to remove credentials and the ERP session while preserving resume content.
 
-```sh
-./scripts/setup.sh
-```
+## Unsigned downloads
 
-## Recommended workflow
+CV++ releases are currently unsigned. Windows may require **More info → Run anyway** once in SmartScreen. On macOS, right-click the app and choose **Open** once in Gatekeeper. Linux users may need to mark the AppImage executable. Signing is planned; never bypass a warning for a file that was not downloaded from the official release.
 
-Use two terminals.
+## Advanced and development
 
-Terminal 1:
+The `cvpp editor` and `cvpp erp` commands remain available for maintainers and power users. They retain repository-relative working-directory behavior and support `--data-dir` for isolated tests. `--cv 1|2|3`, `--download-only`, `--fresh-login`, JSON import/export, portal snapshot import, logs, and the watcher are advanced tools; ordinary students should use the app button and local autosave.
 
-```sh
-./scripts/watch-cv1.sh
-```
+Run the test suite from this directory with `go test ./...`. CI uses fake ERP fixtures only and never stores real credentials.
 
-Terminal 2:
+## Links
 
-```sh
-./cvpp editor
-```
-
-Keep Terminal 1 open while editing. Every time `data/resume.json` is saved, the watcher runs:
-
-```sh
-./cvpp erp --cv 1
-```
-
-Then it downloads:
-
-```text
-pdf/resume-erp-cv1.pdf
-```
-
-When ERP asks for OTP, paste it in Terminal 1.
-
-## What to edit
-
-Use the editor for normal work:
-
-```sh
-./cvpp editor
-```
-
-The editor loads and saves:
-
-```text
-data/resume.json
-```
-
-Hidden entries and hidden bullet points remain in JSON but are skipped during ERP sync.
-
-## Safety
-
-The following are ignored by git:
-
-- `.erp-cv-secrets/`
-- `data/resume.json`
-- `pdf/`
-- generated PDFs
-- saved/debug ERP pages
-
-Do not commit your real ERP credentials, security answers, session files, or generated CV PDFs.
+- [Download CV++](https://github.com/shikharish/cvpp/releases/latest)
+- [Source and issues](https://github.com/shikharish/cvpp)
+- [Privacy statement](PRIVACY.md)
+- [MIT License](LICENSE)

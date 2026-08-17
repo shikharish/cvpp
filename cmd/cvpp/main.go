@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
+	"cvpp/internal/appdata"
 	"cvpp/internal/editorserver"
 	"cvpp/internal/erp"
 	"cvpp/internal/workflow"
@@ -15,15 +18,20 @@ import (
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  cvpp [--data-dir PATH]                 launch the local application")
 	fmt.Fprintln(os.Stderr, "  ./cvpp editor [--addr 127.0.0.1:0] [--no-open]")
 	fmt.Fprintln(os.Stderr, "  ./cvpp erp [--cv 1|2|3] [--json PATH] [--out PATH] [--download-only] [--fresh-login] [--secrets-dir PATH]")
 	fmt.Fprintln(os.Stderr, "  ./cvpp erp --open [--fresh-login] [--secrets-dir PATH]")
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	if len(os.Args) > 1 && (os.Args[1] == "-h" || os.Args[1] == "--help") {
 		usage()
-		os.Exit(2)
+		return
+	}
+	if len(os.Args) < 2 || strings.HasPrefix(os.Args[1], "-") {
+		fatal(runApp(parseAppFlags(os.Args[1:])))
+		return
 	}
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -55,6 +63,7 @@ type editorOptions struct {
 	secretsDir string
 	baseURL    string
 	open       bool
+	dataDir    string
 }
 
 type erpOptions struct {
@@ -66,6 +75,21 @@ type erpOptions struct {
 	downloadOnly bool
 	freshLogin   bool
 	open         bool
+	dataDir      string
+}
+
+type appOptions struct {
+	dataDir string
+	open    bool
+}
+
+func parseAppFlags(args []string) appOptions {
+	flags := flag.NewFlagSet("cvpp", flag.ExitOnError)
+	options := appOptions{open: true}
+	flags.StringVar(&options.dataDir, "data-dir", "", "application data directory (advanced)")
+	flags.BoolVar(&options.open, "open", true, "open the app in the default browser")
+	_ = flags.Parse(args)
+	return options
 }
 
 func parseEditorFlags(args []string) editorOptions {
@@ -76,6 +100,7 @@ func parseEditorFlags(args []string) editorOptions {
 	flags.StringVar(&options.secretsDir, "secrets-dir", ".erp-cv-secrets", "ERP credentials and session directory")
 	flags.StringVar(&options.baseURL, "base-url", erp.DefaultBaseURL, "ERP base URL")
 	flags.BoolVar(&options.open, "open", true, "open the editor in the default browser")
+	flags.StringVar(&options.dataDir, "data-dir", "", "application data directory (advanced)")
 	noOpen := flags.Bool("no-open", false, "print the editor URL without opening a browser")
 	_ = flags.Parse(args)
 	if *noOpen {
@@ -95,6 +120,7 @@ func parseERPFlags(name string, args []string) erpOptions {
 	flags.BoolVar(&options.downloadOnly, "download-only", false, "download the currently saved ERP CV without synchronizing JSON")
 	flags.BoolVar(&options.freshLogin, "fresh-login", false, "discard the saved ERP session and authenticate again")
 	flags.BoolVar(&options.open, "open", false, "open ERP in the browser with a fresh unconsumed login token")
+	flags.StringVar(&options.dataDir, "data-dir", "", "application data directory (advanced)")
 	_ = flags.Parse(args)
 	if options.variant < 1 || options.variant > 3 {
 		fmt.Fprintln(os.Stderr, "error: --cv must be 1, 2, or 3")
@@ -125,6 +151,7 @@ func runEditor(repoRoot string, options editorOptions) error {
 		OpenERPURL: func(url string) error {
 			return openBrowser(runtime.GOOS, url)
 		},
+		DataDir: options.dataDir,
 	}
 	if options.open {
 		serverOptions.OpenURL = func(url string) error {
@@ -134,7 +161,52 @@ func runEditor(repoRoot string, options editorOptions) error {
 	return editorserver.Serve(context.Background(), serverOptions)
 }
 
+func runApp(options appOptions) error {
+	paths, err := appdata.Resolve(options.dataDir)
+	if err != nil {
+		return err
+	}
+	serverOptions := editorserver.Options{
+		Addr: "127.0.0.1:0", DataDir: paths.Root, AppMode: true,
+		BaseURL: erp.DefaultBaseURL,
+		OpenURL: func(url string) error {
+			if !options.open {
+				fmt.Println(url)
+				return nil
+			}
+			return openEditorBrowser(runtime.GOOS, url)
+		},
+		OpenERPURL: func(url string) error { return openBrowser(runtime.GOOS, url) },
+	}
+	err = editorserver.Serve(context.Background(), serverOptions)
+	if err != nil && errors.Is(err, appdata.ErrAlreadyRunning) {
+		if state, readErr := appdata.ReadRuntimeState(paths.RuntimeState); readErr == nil && state.URL != "" {
+			if !options.open {
+				fmt.Println(state.URL)
+				return nil
+			}
+			return openEditorBrowser(runtime.GOOS, state.URL)
+		}
+	}
+	return err
+}
+
 func runERP(repoRoot string, options erpOptions) error {
+	if options.dataDir != "" {
+		paths, err := appdata.Resolve(options.dataDir)
+		if err != nil {
+			return err
+		}
+		if options.jsonPath == "data/resume.json" {
+			options.jsonPath = paths.ResumeJSON
+		}
+		if options.secretsDir == ".erp-cv-secrets" {
+			options.secretsDir = paths.SecretsDir
+		}
+		if options.output == "" {
+			options.output = paths.PDF(options.variant)
+		}
+	}
 	if !options.open {
 		return workflow.RunERP(context.Background(), repoRoot, workflow.ERPOptions{
 			Variant:      options.variant,

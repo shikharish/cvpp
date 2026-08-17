@@ -3,6 +3,10 @@
 # Local build output
 /cvpp
 /erp-cv-portal
+/cvpp.exe
+*.app
+/dist/
+/test/
 
 # Student-specific resume data and generated PDFs
 /data/resume.json

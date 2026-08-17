@@ -2,10 +2,13 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
+	"cvpp/internal/appdata"
 	"cvpp/internal/erp"
 	"cvpp/internal/progress"
 	"cvpp/internal/resumedata"
@@ -19,6 +22,16 @@ type ERPOptions struct {
 	BaseURL      string
 	DownloadOnly bool
 	FreshLogin   bool
+	OTP          erp.OTPProvider
+	Phase        func(string)
+}
+
+type ImportOptions struct {
+	Paths      appdata.Paths
+	BaseURL    string
+	FreshLogin bool
+	OTP        erp.OTPProvider
+	Phase      func(string)
 }
 
 type ERPBrowserOptions struct {
@@ -29,6 +42,11 @@ type ERPBrowserOptions struct {
 }
 
 func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
+	phase := func(value string) {
+		if options.Phase != nil {
+			options.Phase(value)
+		}
+	}
 	resolve := func(path string) string {
 		if filepath.IsAbs(path) {
 			return path
@@ -54,11 +72,16 @@ func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
 	if err != nil {
 		return err
 	}
+	if options.OTP != nil {
+		client.OTP = options.OTP
+	}
+	client.Phase = options.Phase
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	progress.Logf("ERP CV: authenticating with ERP")
+	phase("authenticating")
 	var authErr error
 	if options.FreshLogin {
 		authErr = client.AuthenticateFresh(ctx)
@@ -70,12 +93,14 @@ func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
 	}
 
 	if !options.DownloadOnly {
+		phase("saving")
 		progress.Logf("ERP CV: synchronizing %d entries across CV1, CV2, and CV3", entryCount)
 		if err := client.SyncResume(ctx, fields); err != nil {
 			return err
 		}
 	}
 
+	phase("downloading")
 	progress.Logf("ERP CV: downloading CV%d", options.Variant)
 	pdf, err := client.DownloadPDF(ctx, options.Variant)
 	if err != nil {
@@ -86,7 +111,83 @@ func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
 	if output == "" {
 		output = fmt.Sprintf("pdf/resume-erp-cv%d.pdf", options.Variant)
 	}
-	return erp.WritePDF(resolve(output), pdf)
+	if err := erp.WritePDF(resolve(output), pdf); err != nil {
+		return err
+	}
+	phase("pdf-updated")
+	phase("done")
+	return nil
+}
+
+// ImportPortal authenticates, reads StudentForm.jsp, converts it locally, and
+// downloads CV1. It intentionally never calls SyncResume, so onboarding cannot
+// overwrite a student's existing ERP content.
+func ImportPortal(ctx context.Context, options ImportOptions) error {
+	if err := options.Paths.Ensure(); err != nil {
+		return err
+	}
+	phase := func(value string) {
+		if options.Phase != nil {
+			options.Phase(value)
+		}
+	}
+	client, err := erp.New(options.BaseURL, options.Paths.SecretsDir)
+	if err != nil {
+		return err
+	}
+	if options.OTP != nil {
+		client.OTP = options.OTP
+	}
+	client.Phase = options.Phase
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	phase("authenticating")
+	if options.FreshLogin {
+		if err := client.AuthenticateFresh(ctx); err != nil {
+			return err
+		}
+	} else if err := client.Authenticate(ctx); err != nil {
+		return err
+	}
+	phase("importing")
+	snapshot, err := client.FetchResumeForm(ctx)
+	if err != nil {
+		return err
+	}
+	resume, err := resumedata.ConvertPortalForm(snapshot.Values)
+	if err != nil {
+		return fmt.Errorf("convert ERP resume: %w", err)
+	}
+	data, err := json.MarshalIndent(resume, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	// Download CV1 before changing the local JSON. An ERP outage or an empty
+	// PDF therefore leaves the previous resume and recovery path untouched.
+	phase("downloading")
+	pdf, err := client.DownloadPDF(ctx, 1)
+	if err != nil {
+		return err
+	}
+	if err := appdata.AtomicWrite(options.Paths.PDF(1), pdf, 0o600); err != nil {
+		return fmt.Errorf("save ERP PDF: %w", err)
+	}
+	if existing, readErr := os.ReadFile(options.Paths.ResumeJSON); readErr == nil {
+		phase("saving")
+		if err := appdata.AtomicWrite(options.Paths.BackupName(time.Now()), existing, 0o600); err != nil {
+			return fmt.Errorf("backup existing resume: %w", err)
+		}
+	} else if !os.IsNotExist(readErr) {
+		return fmt.Errorf("read existing resume for backup: %w", readErr)
+	}
+	phase("saving")
+	if err := appdata.AtomicWrite(options.Paths.ResumeJSON, data, 0o600); err != nil {
+		return fmt.Errorf("save imported resume: %w", err)
+	}
+	phase("pdf-updated")
+	phase("done")
+	return nil
 }
 
 func OpenERPBrowser(ctx context.Context, repoRoot string, options ERPBrowserOptions) error {

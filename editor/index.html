@@ -14,6 +14,25 @@
       </div>
     </header>
 
+    <section id="setup-overlay" class="setup-overlay" hidden aria-labelledby="setup-title">
+      <div class="setup-card">
+        <p class="eyebrow">Private on this computer</p>
+        <h2 id="setup-title">Connect your IIT KGP ERP account</h2>
+        <p class="setup-privacy">Your ERP credentials, session, resume, and PDFs are stored only on this computer. CV++ sends them directly from this local app to IIT KGP ERP; there is no CV++ server, analytics, or cloud copy.</p>
+        <form id="setup-form">
+          <label class="field"><span>ERP roll number</span><input id="setup-roll" class="input" autocomplete="username" required></label>
+          <label class="field"><span>ERP password</span><input id="setup-password" class="input" type="password" autocomplete="current-password" required></label>
+          <div class="setup-question-row"><label class="field"><span>Security question</span><input id="setup-question" class="input" required readonly></label><button id="fetch-question" class="button secondary" type="button">Fetch question</button></div>
+          <label class="field"><span>Answer</span><input id="setup-answer" class="input" type="password" autocomplete="off" required></label>
+          <label class="check"><input id="setup-manual-question" type="checkbox"> I entered the question manually</label>
+          <p id="setup-error" class="setup-error" hidden></p>
+          <button class="button primary" type="submit">Save and import my existing ERP resume</button>
+          <button id="restore-backup" class="button secondary" type="button">Restore a local JSON backup instead</button>
+        </form>
+        <div id="otp-panel" class="otp-panel" hidden><h3>Enter the ERP email OTP</h3><p>ERP sent a one-time code to your registered email. It is used only for this login and is never saved.</p><form id="otp-form"><input id="setup-otp" class="input" inputmode="numeric" pattern="[0-9]{4,8}" autocomplete="one-time-code" required><button class="button primary" type="submit">Continue</button></form></div>
+      </div>
+    </section>
+
     <div class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-actions" aria-label="Resume file actions">
@@ -42,8 +61,9 @@
           </label>
           <button id="open-pdf-viewer" class="button secondary">Open PDF Viewer</button>
           <button id="open-erp" class="button secondary">Open ERP</button>
-          <button id="run-erp" class="button primary">Sync + download PDF</button>
+          <button id="run-erp" class="button primary">Update ERP Resume</button>
           <pre id="erp-log" class="erp-log" hidden></pre>
+          <details class="advanced-tools"><summary>Advanced and privacy</summary><button id="forget-login" class="button danger small" type="button">Forget ERP login</button><button id="quit-app" class="button secondary small" type="button">Quit CV++</button><p>JSON import/export, portal snapshots, Open ERP, CV2/CV3, logs, and manual save remain available here for advanced workflows.</p></details>
         </section>
 
         <nav id="navigation" aria-label="Resume sections">
@@ -66,6 +86,7 @@
       </aside>
 
       <main id="workspace" class="workspace" tabindex="-1"></main>
+      <aside id="pdf-column" class="pdf-column" hidden><div id="pdf-panel" class="pdf-panel"><div class="pdf-panel-header"><strong>ERP PDF · CV1</strong><span id="pdf-state">No PDF downloaded yet</span></div><iframe id="pdf-frame" title="ERP CV1 PDF preview"></iframe></div></aside>
     </div>
 
     <input id="json-file-input" type="file" accept="application/json,.json" hidden>

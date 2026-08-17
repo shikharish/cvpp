@@ -1,0 +1,32 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: cvpp}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: cvpp/go.mod, cache-dependency-path: cvpp/go.sum}
+      - run: go test ./...
+      - run: go vet ./...
+  compile:
+    strategy:
+      matrix:
+        include:
+          - {os: ubuntu-latest, goos: linux, goarch: amd64}
+          - {os: windows-latest, goos: windows, goarch: amd64}
+          - {os: macos-13, goos: darwin, goarch: amd64}
+          - {os: macos-14, goos: darwin, goarch: arm64}
+    runs-on: ${{ matrix.os }}
+    defaults: {run: {working-directory: cvpp}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: cvpp/go.mod, cache-dependency-path: cvpp/go.sum}
+      - run: go build ./cmd/cvpp
+        env: {GOOS: ${{ matrix.goos }}, GOARCH: ${{ matrix.goarch }}, CGO_ENABLED: 0}

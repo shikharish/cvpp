@@ -29,10 +29,17 @@ var (
 
 type Resume struct {
 	SchemaVersion int       `json:"schemaVersion"`
+	Metadata      Metadata  `json:"metadata,omitempty"`
 	Academics     Academics `json:"academics"`
 	Shared        Shared    `json:"shared"`
 	Variants      []Variant `json:"variants"`
 	Entries       []Entry   `json:"entries"`
+}
+
+type Metadata struct {
+	Name       string `json:"name,omitempty"`
+	DocumentID string `json:"documentId,omitempty"`
+	UpdatedAt  string `json:"updatedAt,omitempty"`
 }
 
 type Academics struct {

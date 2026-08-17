@@ -3,21 +3,23 @@ package editorserver
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"cvpp/editor"
+	"cvpp/internal/appdata"
+	"cvpp/internal/defaultdata"
+	"cvpp/internal/erp"
 	"cvpp/internal/progress"
 	"cvpp/internal/resumedata"
 	"cvpp/internal/workflow"
@@ -31,29 +33,54 @@ type Options struct {
 	BaseURL    string
 	OpenURL    func(string) error
 	OpenERPURL func(string) error
+	DataDir    string
+	AppMode    bool
 }
 
+var version = "dev"
+
 type Server struct {
-	options Options
-	token   string
-	events  *eventHub
-	jobs    *jobRunner
+	options        Options
+	paths          appdata.Paths
+	host           string
+	bootstrapToken string
+	sessionToken   string
+	bootstrapUsed  bool
+	mu             sync.Mutex
+	connected      int
+	lastActivity   time.Time
+	shutdown       context.CancelFunc
+	instance       *appdata.Instance
+	otp            *erp.InteractiveOTP
+	events         *eventHub
+	jobs           *jobRunner
 }
 
 func Serve(ctx context.Context, options Options) error {
 	if options.Addr == "" {
 		options.Addr = "127.0.0.1:0"
 	}
-	if options.JSONPath == "" {
-		options.JSONPath = "data/resume.json"
-	}
-	if options.SecretsDir == "" {
-		options.SecretsDir = ".erp-cv-secrets"
-	}
-
-	token, err := randomToken()
+	paths, err := appdata.Resolve(options.DataDir)
 	if err != nil {
 		return err
+	}
+	if err := paths.Ensure(); err != nil {
+		return err
+	}
+	if options.AppMode || options.DataDir != "" {
+		if options.JSONPath == "" {
+			options.JSONPath = paths.ResumeJSON
+		}
+		if options.SecretsDir == "" {
+			options.SecretsDir = paths.SecretsDir
+		}
+	} else {
+		if options.JSONPath == "" {
+			options.JSONPath = "data/resume.json"
+		}
+		if options.SecretsDir == "" {
+			options.SecretsDir = ".erp-cv-secrets"
+		}
 	}
 
 	listener, err := net.Listen("tcp", options.Addr)
@@ -62,27 +89,43 @@ func Serve(ctx context.Context, options Options) error {
 	}
 	defer listener.Close()
 
-	server := &Server{
-		options: options,
-		token:   token,
-		events:  newEventHub(),
+	bootstrapToken, err := appdata.RandomToken(24)
+	if err != nil {
+		return err
 	}
+	sessionToken, err := appdata.RandomToken(32)
+	if err != nil {
+		return err
+	}
+	server := &Server{options: options, paths: paths, host: listener.Addr().String(), bootstrapToken: bootstrapToken, sessionToken: sessionToken, events: newEventHub(), otp: erp.NewInteractiveOTP(), lastActivity: time.Now()}
 	server.jobs = &jobRunner{server: server}
+	instance, err := appdata.AcquireInstance(paths, appdata.RuntimeState{PID: os.Getpid(), Port: listener.Addr().(*net.TCPAddr).Port, StartedAt: time.Now().UTC(), URL: "http://" + listener.Addr().String() + "/"})
+	if err != nil {
+		return err
+	}
+	server.instance = instance
+	defer instance.Close()
 
 	mux := http.NewServeMux()
 	server.routes(mux)
 
-	httpServer := &http.Server{Handler: mux}
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	server.shutdown = cancel
+	httpServer := &http.Server{Handler: securityHeaders(server, mux)}
 	errc := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
+		<-requestCtx.Done()
 		_ = httpServer.Shutdown(context.Background())
 	}()
+	if options.AppMode {
+		go server.stopWhenIdle(requestCtx)
+	}
 	go func() {
 		errc <- httpServer.Serve(listener)
 	}()
 
-	url := "http://" + listener.Addr().String() + "/?token=" + token
+	url := "http://" + listener.Addr().String() + "/bootstrap?token=" + bootstrapToken
 	progress.Logf("Editor: serving %s", url)
 	if options.OpenURL != nil {
 		progress.Logf("Editor: opening the browser")
@@ -99,6 +142,13 @@ func Serve(ctx context.Context, options Options) error {
 }
 
 func (s *Server) routes(mux *http.ServeMux) {
+	mux.HandleFunc("/bootstrap", s.handleBootstrap)
+	mux.HandleFunc("/api/app/status", s.requireToken(s.handleAppStatus))
+	mux.HandleFunc("/api/app/shutdown", s.requireToken(s.handleShutdown))
+	mux.HandleFunc("/api/setup/security-question", s.requireToken(s.handleSecurityQuestion))
+	mux.HandleFunc("/api/setup/credentials", s.requireToken(s.handleCredentials))
+	mux.HandleFunc("/api/setup/import", s.requireToken(s.handleImport))
+	mux.HandleFunc("/api/erp/otp", s.requireToken(s.handleOTP))
 	mux.HandleFunc("/api/resume", s.requireToken(s.handleResume))
 	mux.HandleFunc("/api/erp/open", s.requireToken(s.handleERPOpen))
 	mux.HandleFunc("/api/erp/run", s.requireToken(s.handleERPRun))
@@ -111,17 +161,17 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/pdf/file/cv2", s.requireToken(s.handlePDFFile))
 	mux.HandleFunc("/pdf/file/cv3", s.requireToken(s.handlePDFFile))
 
-	editorDir := filepath.Join(s.options.RepoRoot, "editor")
-	mux.Handle("/", http.FileServer(http.Dir(editorDir)))
+	mux.Handle("/", http.FileServer(http.FS(editor.Files)))
 }
 
 func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
-		if token == "" {
-			token = r.Header.Get("X-Resume-Editor-Token")
+		if r.URL.Query().Get("token") != "" || r.Header.Get("X-Resume-Editor-Token") != "" {
+			http.Error(w, "query-string tokens are not accepted; open the bootstrap URL once", http.StatusForbidden)
+			return
 		}
-		if token != s.token {
+		cookie, err := r.Cookie("cvpp_session")
+		if err != nil || cookie.Value != s.sessionToken {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -129,13 +179,246 @@ func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet || r.URL.Query().Get("token") == "" || r.URL.Query().Get("token") != s.bootstrapToken {
+		http.NotFound(w, r)
+		return
+	}
+	s.mu.Lock()
+	if s.bootstrapUsed {
+		s.mu.Unlock()
+		http.Error(w, "bootstrap token expired", http.StatusGone)
+		return
+	}
+	s.bootstrapUsed = true
+	s.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: "cvpp_session", Value: s.sessionToken, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 86400})
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func securityHeaders(s *Server, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if host := r.Host; host != s.host && host != "localhost:"+strings.Split(s.host, ":")[1] {
+			http.Error(w, "invalid host", http.StatusForbidden)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+s.host && origin != "http://localhost:"+strings.Split(s.host, ":")[1] {
+			http.Error(w, "invalid origin", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		s.mu.Lock()
+		s.connected++
+		s.lastActivity = time.Now()
+		s.mu.Unlock()
+		defer func() { s.mu.Lock(); s.connected--; s.mu.Unlock() }()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) stopWhenIdle(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			s.mu.Lock()
+			idle := s.connected == 0 && now.Sub(s.lastActivity) >= 30*time.Minute
+			s.mu.Unlock()
+			if idle && !s.jobs.isRunning() {
+				if s.shutdown != nil {
+					s.shutdown()
+				}
+				return
+			}
+		}
+	}
+}
+
+func (s *Server) resumePath() string {
+	if s.options.JSONPath != "" {
+		return s.resolve(s.options.JSONPath)
+	}
+	return s.paths.ResumeJSON
+}
+
+func (s *Server) secretsDir() string {
+	if s.options.SecretsDir != "" {
+		return s.resolve(s.options.SecretsDir)
+	}
+	return s.paths.SecretsDir
+}
+
+func (s *Server) handleAppStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resumeExists := false
+	if _, err := os.Stat(s.resumePath()); err == nil {
+		resumeExists = true
+	}
+	_, credentialErr := os.Stat(filepath.Join(s.secretsDir(), "erpcreds.json"))
+	_, sessionErr := os.Stat(filepath.Join(s.secretsDir(), ".session"))
+	pdfs := make([]map[string]any, 0, 3)
+	for variant := 1; variant <= 3; variant++ {
+		path := s.pdfPath(variant)
+		item := map[string]any{"cv": variant, "exists": false}
+		if info, err := os.Stat(path); err == nil {
+			item["exists"] = true
+			item["size"] = info.Size()
+			item["signature"] = fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
+		}
+		pdfs = append(pdfs, item)
+	}
+	job := s.jobs.status()
+	writeJSON(w, map[string]any{
+		"ok": true, "version": version, "onboarding": !resumeExists || credentialErr != nil,
+		"credentials": credentialErr == nil, "session": sessionErr == nil, "resume": resumeExists,
+		"pdfs": pdfs, "jobRunning": job.Running, "job": job, "otpRequired": s.otp.Waiting(),
+	})
+}
+
+func (s *Server) handleSecurityQuestion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		RollNumber string `json:"rollNumber"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&request); err != nil {
+		writeAPIError(w, errors.New("invalid request"), http.StatusBadRequest)
+		return
+	}
+	client, err := erp.New(s.options.BaseURL, s.secretsDir())
+	if err != nil {
+		writeAPIError(w, err, http.StatusInternalServerError)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	question, err := client.FetchSecurityQuestion(ctx, request.RollNumber)
+	if err != nil {
+		writeAPIError(w, err, http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "question": question})
+}
+
+func (s *Server) handleCredentials(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(s.secretsDir(), "erpcreds.json")
+	switch r.Method {
+	case http.MethodPut:
+		var request erp.Credentials
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&request); err != nil {
+			writeAPIError(w, errors.New("invalid credentials payload"), http.StatusBadRequest)
+			return
+		}
+		if existing, readErr := erp.LoadCredentials(path); readErr == nil {
+			if request.RollNumber == "" {
+				request.RollNumber = existing.RollNumber
+			}
+			if request.Password == "" {
+				request.Password = existing.Password
+			}
+			if request.Answers == nil {
+				request.Answers = map[string]string{}
+			}
+			for question, answer := range existing.Answers {
+				if _, present := request.Answers[question]; !present {
+					request.Answers[question] = answer
+				}
+			}
+		}
+		if err := erp.SaveCredentials(path, request); err != nil {
+			writeAPIError(w, err, http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "saved": true})
+	case http.MethodDelete:
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			writeAPIError(w, err, http.StatusInternalServerError)
+			return
+		}
+		if err := os.Remove(filepath.Join(s.secretsDir(), ".session")); err != nil && !os.IsNotExist(err) {
+			writeAPIError(w, err, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "forgotten": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		OTP string `json:"otp"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+		writeAPIError(w, errors.New("invalid OTP payload"), http.StatusBadRequest)
+		return
+	}
+	if err := s.otp.Submit(request.OTP); err != nil {
+		writeAPIError(w, err, http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "accepted": true})
+}
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		FreshLogin bool `json:"freshLogin"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		writeAPIError(w, errors.New("invalid import payload"), http.StatusBadRequest)
+		return
+	}
+	jobID, err := s.jobs.startImport(request.FreshLogin)
+	if err != nil {
+		writeAPIError(w, err, http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "started": true, "jobID": jobID})
+}
+
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "shuttingDown": true})
+	if s.shutdown != nil {
+		go s.shutdown()
+	}
+}
+
 func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		data, err := os.ReadFile(s.resolve(s.options.JSONPath))
+		data, err := os.ReadFile(s.resumePath())
 		if err != nil {
-			writeAPIError(w, err, http.StatusInternalServerError)
-			return
+			if errors.Is(err, os.ErrNotExist) {
+				data, err = defaultdata.Files.ReadFile("resume.json")
+			}
+			if err != nil {
+				writeAPIError(w, err, http.StatusInternalServerError)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write(data)
@@ -157,7 +440,7 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 		if !bytes.HasSuffix(data, []byte("\n")) {
 			data = append(data, '\n')
 		}
-		if err := atomicWrite(s.resolve(s.options.JSONPath), data, 0o644); err != nil {
+		if err := appdata.AtomicWrite(s.resumePath(), data, 0o600); err != nil {
 			writeAPIError(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -188,11 +471,12 @@ func (s *Server) handleERPRun(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, fmt.Errorf("cv must be 1, 2, or 3"), http.StatusBadRequest)
 		return
 	}
-	if err := s.jobs.start(request.CV, request.FreshLogin, request.DownloadOnly); err != nil {
+	jobID, err := s.jobs.start(request.CV, request.FreshLogin, request.DownloadOnly)
+	if err != nil {
 		writeAPIError(w, err, http.StatusConflict)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "started": true})
+	writeJSON(w, map[string]any{"ok": true, "started": true, "jobID": jobID})
 }
 
 func (s *Server) handleERPOpen(w http.ResponseWriter, r *http.Request) {
@@ -211,11 +495,12 @@ func (s *Server) handleERPOpen(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusBadRequest)
 		return
 	}
-	if err := s.jobs.startOpen(request.FreshLogin); err != nil {
+	jobID, err := s.jobs.startOpen(request.FreshLogin)
+	if err != nil {
 		writeAPIError(w, err, http.StatusConflict)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "started": true})
+	writeJSON(w, map[string]any{"ok": true, "started": true, "jobID": jobID})
 }
 
 func (s *Server) handleERPEvents(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +559,6 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
 	}
 	setNoCache(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	token := url.QueryEscape(s.token)
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
 <head>
@@ -298,8 +582,8 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
   <iframe id="pdf" title="CV%d PDF"></iframe>
   <script>
     const cv = %d;
-    const statusURL = "/api/pdf/status?cv=%d&token=%s";
-    const fileURL = "/pdf/file/cv%d?token=%s";
+    const statusURL = "/api/pdf/status?cv=%d";
+    const fileURL = "/pdf/file/cv%d";
     const status = document.getElementById("status");
     const frame = document.getElementById("pdf");
     let currentSignature = "";
@@ -329,7 +613,7 @@ func (s *Server) handlePDFViewer(w http.ResponseWriter, r *http.Request) {
     setInterval(poll, 1000);
   </script>
 </body>
-</html>`, variant, variant, variant, variant, variant, variant, token, variant, token)
+</html>`, variant, variant, variant, variant, variant, variant, variant)
 }
 
 func (s *Server) handlePDFFile(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +649,9 @@ func (s *Server) handlePDFFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) pdfPath(variant int) string {
+	if s.options.DataDir != "" || s.options.AppMode {
+		return s.paths.PDF(variant)
+	}
 	return s.resolve(fmt.Sprintf("pdf/resume-erp-cv%d.pdf", variant))
 }
 
@@ -428,32 +715,54 @@ func setNoCache(w http.ResponseWriter) {
 type jobRunner struct {
 	server *Server
 	mu     sync.Mutex
-	active bool
+	nextID uint64
+	state  jobState
 }
 
-func (j *jobRunner) reserve() error {
+type jobState struct {
+	ID        uint64 `json:"id"`
+	Kind      string `json:"kind,omitempty"`
+	Phase     string `json:"phase,omitempty"`
+	Running   bool   `json:"running"`
+	Completed bool   `json:"completed"`
+	OK        bool   `json:"ok"`
+	Message   string `json:"message,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func (j *jobRunner) reserve(kind string) (uint64, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.active {
-		return fmt.Errorf("an ERP job is already running")
+	if j.state.Running {
+		return 0, fmt.Errorf("an ERP job is already running")
 	}
-	j.active = true
-	return nil
+	j.nextID++
+	j.state = jobState{ID: j.nextID, Kind: kind, Phase: "queued", Running: true}
+	return j.state.ID, nil
 }
 
-func (j *jobRunner) release() {
+func (j *jobRunner) finish(ok bool, message, errorMessage string) {
 	j.mu.Lock()
-	j.active = false
+	j.state.Running = false
+	j.state.Completed = true
+	j.state.OK = ok
+	j.state.Message = message
+	j.state.Error = errorMessage
+	jobID := j.state.ID
 	j.mu.Unlock()
+	j.server.events.broadcast(event{name: "done", data: map[string]any{
+		"jobID": jobID, "ok": ok, "message": message, "error": errorMessage, "running": false,
+	}})
 }
 
-func (j *jobRunner) start(cv int, freshLogin, downloadOnly bool) error {
-	if err := j.reserve(); err != nil {
-		return err
+func (j *jobRunner) start(cv int, freshLogin, downloadOnly bool) (uint64, error) {
+	jobID, err := j.reserve("erp")
+	if err != nil {
+		return 0, err
 	}
 
 	go func() {
-		defer j.release()
+		j.phase("authenticating")
 
 		label := "sync + download"
 		if downloadOnly {
@@ -472,26 +781,61 @@ func (j *jobRunner) start(cv int, freshLogin, downloadOnly bool) error {
 			BaseURL:      j.server.options.BaseURL,
 			DownloadOnly: downloadOnly,
 			FreshLogin:   freshLogin,
+			OTP:          j.otpForJob(),
+			Phase:        j.phase,
 		})
 		if err != nil {
 			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": "ERP failed: " + err.Error()}})
-			j.server.events.broadcast(event{name: "done", data: map[string]any{"ok": false, "error": err.Error(), "running": false}})
+			j.finish(false, "", friendlyError(err))
 			return
 		}
 		output := "pdf/resume-erp-cv" + strconv.Itoa(cv) + ".pdf"
-		j.server.events.broadcast(event{name: "done", data: map[string]any{"ok": true, "message": "ERP PDF saved to " + output, "running": false}})
+		j.finish(true, "ERP PDF saved to "+output, "")
 	}()
+	return jobID, nil
+}
+
+func (j *jobRunner) startImport(freshLogin bool) (uint64, error) {
+	jobID, err := j.reserve("import")
+	if err != nil {
+		return 0, err
+	}
+	go func() {
+		removeSink := progress.AddSink(func(line string) {
+			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": line}})
+		})
+		defer removeSink()
+		err := workflow.ImportPortal(context.Background(), workflow.ImportOptions{Paths: j.server.paths, BaseURL: j.server.options.BaseURL, FreshLogin: freshLogin, OTP: j.server.otp, Phase: j.phase})
+		if err != nil {
+			j.finish(false, "", friendlyError(err))
+			return
+		}
+		j.finish(true, "ERP resume imported without changing the portal.", "")
+	}()
+	return jobID, nil
+}
+
+func (j *jobRunner) otpForJob() erp.OTPProvider {
+	if j.server.options.AppMode {
+		return j.server.otp
+	}
 	return nil
 }
 
-func (j *jobRunner) startOpen(freshLogin bool) error {
-	if err := j.reserve(); err != nil {
-		return err
+func (j *jobRunner) phase(value string) {
+	j.mu.Lock()
+	j.state.Phase = value
+	j.mu.Unlock()
+	j.server.events.broadcast(event{name: "phase", data: map[string]any{"phase": value, "running": true}})
+}
+
+func (j *jobRunner) startOpen(freshLogin bool) (uint64, error) {
+	jobID, err := j.reserve("open")
+	if err != nil {
+		return 0, err
 	}
 
 	go func() {
-		defer j.release()
-
 		j.server.events.broadcast(event{name: "log", data: map[string]any{"message": "Starting ERP browser open"}})
 		removeSink := progress.AddSink(func(line string) {
 			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": line}})
@@ -506,18 +850,39 @@ func (j *jobRunner) startOpen(freshLogin bool) error {
 		})
 		if err != nil {
 			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": "ERP open failed: " + err.Error()}})
-			j.server.events.broadcast(event{name: "done", data: map[string]any{"ok": false, "error": err.Error(), "running": false}})
+			j.finish(false, "", friendlyError(err))
 			return
 		}
-		j.server.events.broadcast(event{name: "done", data: map[string]any{"ok": true, "message": "ERP browser handoff opened.", "running": false}})
+		j.finish(true, "ERP browser handoff opened.", "")
 	}()
-	return nil
+	return jobID, nil
 }
 
 func (j *jobRunner) isRunning() bool {
+	return j.status().Running
+}
+
+func (j *jobRunner) status() jobState {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return j.active
+	return j.state
+}
+
+func friendlyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if strings.Contains(strings.ToLower(message), "security question") {
+		return "ERP needs the answer to a new security question. Update your local login and retry."
+	}
+	if strings.Contains(strings.ToLower(message), "session") {
+		return "Your ERP session expired. Choose fresh login and retry."
+	}
+	if strings.Contains(strings.ToLower(message), "empty pdf") {
+		return "ERP returned no PDF. Your local resume is safe; retry later."
+	}
+	return message
 }
 
 type event struct {
@@ -579,40 +944,4 @@ func writeAPIError(w http.ResponseWriter, err error, status int) {
 		"ok":    false,
 		"error": err.Error(),
 	})
-}
-
-func randomToken() (string, error) {
-	var data [16]byte
-	if _, err := rand.Read(data[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(data[:]), nil
-}
-
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".resume-write-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
 }

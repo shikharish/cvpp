@@ -38,13 +38,16 @@ type Client struct {
 	SecretsDir             string
 	OTP                    OTPProvider
 	trainingPlacementReady bool
+	Phase                  func(string)
 }
 
-type credentials struct {
+type Credentials struct {
 	RollNumber string            `json:"roll_number"`
 	Password   string            `json:"password"`
 	Answers    map[string]string `json:"answers"`
 }
+
+type credentials = Credentials
 
 type OTPProvider interface {
 	Prepare(context.Context) error
@@ -84,6 +87,52 @@ func (c *Client) DiscardSavedSession() error {
 		return fmt.Errorf("remove saved ERP session: %w", err)
 	}
 	return nil
+}
+
+// LoadCredentials reads the local credential file for setup and tests. It is
+// intentionally not used by any GET handler, so secrets cannot be reflected
+// through the browser API.
+func LoadCredentials(path string) (Credentials, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Credentials{}, err
+	}
+	var creds Credentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return Credentials{}, fmt.Errorf("parse ERP credentials: %w", err)
+	}
+	if strings.TrimSpace(creds.RollNumber) == "" || strings.TrimSpace(creds.Password) == "" || len(creds.Answers) == 0 {
+		return Credentials{}, errors.New("ERP credentials are incomplete")
+	}
+	return creds, nil
+}
+
+func SaveCredentials(path string, creds Credentials) error {
+	creds.RollNumber = strings.TrimSpace(creds.RollNumber)
+	if creds.RollNumber == "" || strings.TrimSpace(creds.Password) == "" || len(creds.Answers) == 0 {
+		return errors.New("ERP credentials are incomplete")
+	}
+	data, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWrite(path, append(data, '\n'), 0o600)
+}
+
+func (c *Client) FetchSecurityQuestion(ctx context.Context, rollNumber string) (string, error) {
+	rollNumber = strings.TrimSpace(rollNumber)
+	if rollNumber == "" {
+		return "", errors.New("ERP roll number is required")
+	}
+	question, err := c.postText(ctx, "/SSOAdministration/getSecurityQues.htm", url.Values{"user_id": {rollNumber}})
+	if err != nil {
+		return "", fmt.Errorf("fetch ERP security question: %w", err)
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return "", errors.New("ERP returned an empty security question")
+	}
+	return question, nil
 }
 
 func (c *Client) authenticate(ctx context.Context, fresh bool) error {
@@ -208,6 +257,9 @@ func (c *Client) requestAndWaitOTP(ctx context.Context, label string, challenge 
 		return "", fmt.Errorf("ERP rejected the OTP request: %s", safeMessage(otpResponse.Message))
 	}
 	progress.Logf("%s: OTP request accepted by ERP", label)
+	if c.Phase != nil {
+		c.Phase("otp-required")
+	}
 	if automatic {
 		progress.Logf("%s: waiting for the OTP email", label)
 	}
@@ -381,16 +433,9 @@ func (c *Client) post(ctx context.Context, path string, values url.Values) (*htt
 }
 
 func (c *Client) readCredentials() (*credentials, error) {
-	data, err := os.ReadFile(filepath.Join(c.SecretsDir, "erpcreds.json"))
+	creds, err := LoadCredentials(filepath.Join(c.SecretsDir, "erpcreds.json"))
 	if err != nil {
 		return nil, fmt.Errorf("read ERP credentials: %w", err)
-	}
-	var creds credentials
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("parse ERP credentials: %w", err)
-	}
-	if creds.RollNumber == "" || creds.Password == "" || len(creds.Answers) == 0 {
-		return nil, errors.New("erpcreds.json is incomplete")
 	}
 	return &creds, nil
 }

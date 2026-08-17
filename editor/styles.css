@@ -24,6 +24,35 @@ body {
   background: var(--surface-soft);
 }
 
+.setup-overlay {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgba(16, 36, 63, .72);
+}
+.setup-card {
+  width: min(620px, 100%);
+  padding: 30px;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .28);
+}
+.setup-card h2 { margin: 5px 0 10px; font-size: 26px; }
+.setup-privacy { margin: 0 0 22px; color: #475467; line-height: 1.55; }
+.setup-card form { display: grid; gap: 14px; }
+.setup-question-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+.setup-question-row .button { height: 40px; }
+.setup-error { margin: 0; padding: 10px 12px; color: #8d2118; background: #fff1f0; border: 1px solid #f5b7b1; border-radius: 8px; line-height: 1.4; }
+.otp-panel { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+.otp-panel h3 { margin: 0 0 6px; }
+.otp-panel p { color: var(--muted); line-height: 1.45; }
+.otp-panel form { grid-template-columns: 1fr auto; align-items: end; }
+.setup-blocked { pointer-events: none; filter: blur(2px); }
+
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button[disabled] { cursor: not-allowed; opacity: .5; transform: none; }
@@ -56,7 +85,7 @@ button[disabled] { cursor: not-allowed; opacity: .5; transform: none; }
 .button.small { padding: 6px 9px; font-size: 12px; border-radius: 6px; }
 .button.icon { padding: 5px 8px; min-width: 31px; }
 
-.app-shell { display: grid; grid-template-columns: 245px minmax(0, 1fr); min-height: calc(100vh - 91px); }
+.app-shell { display: grid; grid-template-columns: 245px minmax(0, 1fr) 360px; min-height: calc(100vh - 91px); }
 .sidebar {
   position: sticky;
   top: 0;
@@ -121,6 +150,10 @@ button[disabled] { cursor: not-allowed; opacity: .5; transform: none; }
   font-size: 10px;
   line-height: 1.45;
 }
+.pdf-panel { margin-top: 8px; display: grid; gap: 7px; }
+.pdf-panel-header { display: flex; justify-content: space-between; gap: 6px; color: #475467; font-size: 10px; }
+.pdf-panel-header span { color: var(--muted); text-align: right; }
+.pdf-panel iframe { width: 100%; height: 330px; min-height: 180px; resize: vertical; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: #525659; }
 .sidebar nav { display: grid; gap: 5px; }
 .nav-item {
   width: 100%;
@@ -148,7 +181,8 @@ button[disabled] { cursor: not-allowed; opacity: .5; transform: none; }
 .status-dot.saved { background: #12b76a; box-shadow: 0 0 0 3px #dafbe9; }
 .validation-summary { margin-top: 18px; padding: 10px; color: #7a271a; background: #fff1f0; border: 1px solid #f5b7b1; border-radius: 8px; font-size: 11px; line-height: 1.45; }
 
-.workspace { width: min(1180px, calc(100vw - 285px)); margin: 0 auto; padding: 28px 30px 80px; }
+.workspace { width: min(1180px, 100%); margin: 0 auto; padding: 28px 30px 80px; }
+.pdf-column { position: sticky; top: 0; height: calc(100vh - 91px); padding: 28px 16px 30px 0; overflow-y: auto; }
 .view-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 20px; }
 .view-header h2 { margin: 0 0 5px; font-size: 24px; letter-spacing: -.02em; }
 .view-header p { margin: 0; color: var(--muted); line-height: 1.5; }
@@ -242,9 +276,26 @@ dialog h2 { margin-top: 0; }
 .toast { position: fixed; right: 24px; bottom: 24px; max-width: 380px; padding: 11px 15px; color: white; background: #172033; border-radius: 8px; box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .18s ease; }
 .toast.show { opacity: 1; transform: translateY(0); }
 
+@media (max-width: 1300px) {
+  .app-shell { grid-template-columns: 245px minmax(0, 1fr); }
+  .pdf-column { grid-column: 1 / -1; position: static; height: auto; padding: 0 20px 30px; }
+  .pdf-column .pdf-panel iframe { height: 620px; }
+}
+
 @media (max-width: 1100px) {
   .workspace { padding-left: 20px; padding-right: 20px; }
   .detail-row { grid-template-columns: 98px 1fr; }
   .detail-side { grid-column: 2; }
   .editor-panel { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  body { min-width: 0; }
+  .setup-card { padding: 22px; }
+  .setup-question-row, .otp-panel form { grid-template-columns: 1fr; }
+  .app-shell { display: block; }
+  .sidebar { position: static; height: auto; }
+  .workspace { width: 100%; padding: 20px 14px 50px; }
+  .pdf-column { padding: 0 14px 24px; }
+  .pdf-column .pdf-panel iframe { height: 480px; }
 }

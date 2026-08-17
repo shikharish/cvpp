@@ -11,12 +11,12 @@ func TestPortalFormatting(t *testing.T) {
 		{Kind: "bullet", HTML: `Temporarily omitted.`, Hidden: true},
 		{Kind: "bullet", HTML: `Added <a href="https://example.com"><strong>fast math</strong></a> with <em>care</em>: 12.7 → 7.2 ns at 9.4× throughput.`},
 	})
-	want := `<ul><li><span style="font-size: 9px;">&nbsp;Added fast math with care: 12.7 to 7.2 ns at 9.4x throughput.</span></li></ul>`
+	want := `<ul><li><span style="font-size: 9px;">&nbsp;Added <strong>fast math</strong> with <em>care</em>: 12.7 to 7.2 ns at 9.4x throughput.</span></li></ul>`
 	if html != want {
 		t.Fatalf("BlocksHTML()\n got %s\nwant %s", html, want)
 	}
-	if strings.Contains(html, "href") || strings.Contains(html, "<strong") || strings.Contains(html, "<em") {
-		t.Fatal("portal formatting retained unsupported inline markup")
+	if strings.Contains(html, "href") {
+		t.Fatal("portal formatting retained an unsafe link")
 	}
 	if strings.Contains(html, "Temporarily omitted") {
 		t.Fatal("portal formatting included a hidden detail block")
@@ -32,7 +32,7 @@ func TestCanonicalResumeMapsToERP(t *testing.T) {
 	if len(resume.Entries) != 4 || fields["standard7"] != "Internship" || fields["standard8"] != "Project" {
 		t.Fatal("example resume did not map expected entries")
 	}
-	if !strings.HasPrefix(fields["subject7"], `<p><span style="font-size: 9px;">Example Company`) {
+	if !strings.HasPrefix(fields["subject7"], `<p><span style="font-size: 9px;"><strong>Example Company`) {
 		t.Fatal("example resume did not move entry overview into the portal body")
 	}
 	if !strings.Contains(fields["subject7"], `<ul><li><span style="font-size: 9px;">`) {
@@ -77,7 +77,7 @@ func TestEntryOverviewMayBeEmpty(t *testing.T) {
 
 func TestBlockHTML(t *testing.T) {
 	got := BlockHTML(`<p><strong>Languages</strong>: C++</p><p>Linux</p>`)
-	want := `<p><span style="font-size: 9px;">Languages: C++</span></p><p><span style="font-size: 9px;">Linux</span></p>`
+	want := `<p><span style="font-size: 9px;"><strong>Languages</strong>: C++</span></p><p><span style="font-size: 9px;">Linux</span></p>`
 	if got != want {
 		t.Fatalf("BlockHTML()\n got %s\nwant %s", got, want)
 	}
@@ -85,7 +85,7 @@ func TestBlockHTML(t *testing.T) {
 
 func TestBlockHTMLPreservesLists(t *testing.T) {
 	got := BlockHTML(`<ul><li><strong>Systems</strong> programming</li><li>Linux</li></ul>`)
-	want := `<ul><li><span style="font-size: 9px;">&nbsp;Systems programming</span></li><li><span style="font-size: 9px;">&nbsp;Linux</span></li></ul>`
+	want := `<ul><li><span style="font-size: 9px;">&nbsp;<strong>Systems</strong> programming</span></li><li><span style="font-size: 9px;">&nbsp;Linux</span></li></ul>`
 	if got != want {
 		t.Fatalf("BlockHTML()\n got %s\nwant %s", got, want)
 	}
