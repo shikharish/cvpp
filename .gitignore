@@ -1,6 +1,7 @@
 .DS_Store
 
 # Local build output
+/cvpp
 /erp-cv-portal
 
 # Student-specific resume data and generated PDFs
@@ -16,4 +17,3 @@
 /StudentForm.jsp
 /view-source_*erp*.htm
 /cvGenerate*.pdf
-

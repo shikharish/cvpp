@@ -205,7 +205,7 @@
       const data = await response.json();
       setDocument(data, "data/resume.json", null);
     } catch (error) {
-      showDialog("Could not load data/resume.json", `<p>${escapeHtml(error.message || error)}</p><p>Check the terminal running <code>./erp-cv-portal editor</code>.</p>`);
+      showDialog("Could not load data/resume.json", `<p>${escapeHtml(error.message || error)}</p><p>Check the terminal running <code>./cvpp editor</code>.</p>`);
       render();
     }
   }

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"erp-cv-portal/internal/progress"
+	"cvpp/internal/progress"
 
 	xhtml "golang.org/x/net/html"
 )

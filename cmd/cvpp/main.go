@@ -8,16 +8,16 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"erp-cv-portal/internal/editorserver"
-	"erp-cv-portal/internal/erp"
-	"erp-cv-portal/internal/workflow"
+	"cvpp/internal/editorserver"
+	"cvpp/internal/erp"
+	"cvpp/internal/workflow"
 )
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  ./erp-cv-portal editor [--addr 127.0.0.1:0] [--no-open]")
-	fmt.Fprintln(os.Stderr, "  ./erp-cv-portal erp [--cv 1|2|3] [--json PATH] [--out PATH] [--download-only] [--fresh-login] [--secrets-dir PATH]")
-	fmt.Fprintln(os.Stderr, "  ./erp-cv-portal erp --open [--fresh-login] [--secrets-dir PATH]")
+	fmt.Fprintln(os.Stderr, "  ./cvpp editor [--addr 127.0.0.1:0] [--no-open]")
+	fmt.Fprintln(os.Stderr, "  ./cvpp erp [--cv 1|2|3] [--json PATH] [--out PATH] [--download-only] [--fresh-login] [--secrets-dir PATH]")
+	fmt.Fprintln(os.Stderr, "  ./cvpp erp --open [--fresh-login] [--secrets-dir PATH]")
 }
 
 func main() {

@@ -1,4 +1,4 @@
-module erp-cv-portal
+module cvpp
 
 go 1.25.8
 

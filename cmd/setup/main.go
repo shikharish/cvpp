@@ -67,7 +67,7 @@ func run() error {
 	fmt.Println("    ./scripts/watch-cv1.sh")
 	fmt.Println()
 	fmt.Println("  Terminal 2:")
-	fmt.Println("    ./erp-cv-portal editor")
+	fmt.Println("    ./cvpp editor")
 	fmt.Println()
 	fmt.Println("Keep Terminal 1 open. Every saved change to data/resume.json will sync CV1 and download pdf/resume-erp-cv1.pdf.")
 	fmt.Println("The ERP OTP prompt will appear in Terminal 1.")
@@ -226,8 +226,8 @@ func fetchSecurityQuestion(rollNumber string) (string, error) {
 
 func buildBinary(root string) error {
 	fmt.Println()
-	fmt.Println("Building ./erp-cv-portal")
-	command := exec.Command("go", "build", "-o", "erp-cv-portal", "./cmd/erp-cv-portal")
+	fmt.Println("Building ./cvpp")
+	command := exec.Command("go", "build", "-o", "cvpp", "./cmd/cvpp")
 	command.Dir = root
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr

@@ -5,7 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 JSON=${ERP_CV_JSON:-"$ROOT/data/resume.json"}
 DEBOUNCE_SECONDS=${ERP_CV_WATCH_DEBOUNCE_SECONDS:-1}
 POLL_SECONDS=${ERP_CV_WATCH_POLL_SECONDS:-1}
-BINARY=${ERP_CV_BINARY:-"$ROOT/erp-cv-portal"}
+BINARY=${CVPP_BINARY:-"$ROOT/cvpp"}
 
 log() {
   printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -46,12 +46,12 @@ stable_checksum() {
 
 last=$(checksum)
 log "Watching $JSON"
-log "On change: ./erp-cv-portal erp --cv 1"
+log "On change: ./cvpp erp --cv 1"
 log "Stop with Ctrl-C"
 
 if [ ! -x "$BINARY" ]; then
-  log "Binary not found; building ./erp-cv-portal"
-  (cd "$ROOT" && go build -o erp-cv-portal ./cmd/erp-cv-portal)
+  log "Binary not found; building ./cvpp"
+  (cd "$ROOT" && go build -o cvpp ./cmd/cvpp)
 fi
 
 while :; do
@@ -65,7 +65,7 @@ while :; do
   log "Detected resume.json change; waiting for a stable write"
   last=$(stable_checksum)
 
-  log "Running ./erp-cv-portal erp --cv 1"
+  log "Running ./cvpp erp --cv 1"
   if "$BINARY" erp --cv 1; then
     log "ERP CV1 sync/download complete"
   else

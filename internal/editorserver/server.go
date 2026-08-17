@@ -18,9 +18,9 @@ import (
 	"strings"
 	"sync"
 
-	"erp-cv-portal/internal/progress"
-	"erp-cv-portal/internal/resumedata"
-	"erp-cv-portal/internal/workflow"
+	"cvpp/internal/progress"
+	"cvpp/internal/resumedata"
+	"cvpp/internal/workflow"
 )
 
 type Options struct {

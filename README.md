@@ -1,4 +1,6 @@
-# IIT KGP ERP CV Portal
+# CV++
+
+> Increment your resume.
 
 A local editor and CLI for maintaining IIT Kharagpur ERP CV data in JSON, syncing it to the CDC resume portal, and downloading the portal-generated PDF.
 
@@ -15,7 +17,7 @@ Your ERP credentials, session, resume JSON, and generated PDFs stay on your mach
 
 ```sh
 git clone <repo-url>
-cd erp-cv-portal
+cd cvpp
 ./scripts/setup.sh
 ```
 
@@ -26,7 +28,7 @@ Use the setup script. It is the supported setup path and does the required local
 - asks for your ERP roll number and password
 - fetches your current ERP security question when possible
 - asks for the security-question answer
-- builds `./erp-cv-portal`
+- builds `./cvpp`
 
 If setup cannot fetch the security question automatically, it will ask you to type the question text manually. The text must match ERP exactly. If ERP later reports a different question, run setup again and add that question too.
 
@@ -49,13 +51,13 @@ Terminal 1:
 Terminal 2:
 
 ```sh
-./erp-cv-portal editor
+./cvpp editor
 ```
 
 Keep Terminal 1 open while editing. Every time `data/resume.json` is saved, the watcher runs:
 
 ```sh
-./erp-cv-portal erp --cv 1
+./cvpp erp --cv 1
 ```
 
 Then it downloads:
@@ -71,7 +73,7 @@ When ERP asks for OTP, paste it in Terminal 1.
 Use the editor for normal work:
 
 ```sh
-./erp-cv-portal editor
+./cvpp editor
 ```
 
 The editor loads and saves:

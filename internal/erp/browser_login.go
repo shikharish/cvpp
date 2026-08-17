@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"path/filepath"
 
-	"erp-cv-portal/internal/progress"
+	"cvpp/internal/progress"
 )
 
 func (c *Client) BrowserLoginURL(ctx context.Context) (string, error) {

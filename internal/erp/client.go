@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"erp-cv-portal/internal/pdfutil"
-	"erp-cv-portal/internal/progress"
+	"cvpp/internal/pdfutil"
+	"cvpp/internal/progress"
 )
 
 const DefaultBaseURL = "https://erp.iitkgp.ac.in"

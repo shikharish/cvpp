@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"erp-cv-portal/internal/erp"
-	"erp-cv-portal/internal/progress"
-	"erp-cv-portal/internal/resumedata"
+	"cvpp/internal/erp"
+	"cvpp/internal/progress"
+	"cvpp/internal/resumedata"
 )
 
 type ERPOptions struct {

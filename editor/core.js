@@ -34,7 +34,7 @@
 
   const SECTION_VALUES = SECTION_OPTIONS.map((option) => option.value);
   const VARIANT_IDS = ["cv1", "cv2", "cv3"];
-  const DRAFT_KEY = "erp-cv-portal-draft-v1";
+  const DRAFT_KEY = "cvpp-draft-v1";
   const PORTAL_FONT_SIZE = 9;
   const MAX_GAP_PIXELS = 24;
 
