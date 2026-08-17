@@ -49,6 +49,11 @@ log "Watching $JSON"
 log "On change: ./erp-cv-portal erp --cv 1"
 log "Stop with Ctrl-C"
 
+if [ ! -x "$BINARY" ]; then
+  log "Binary not found; building ./erp-cv-portal"
+  (cd "$ROOT" && go build -o erp-cv-portal ./cmd/erp-cv-portal)
+fi
+
 while :; do
   sleep "$POLL_SECONDS"
   current=$(checksum)
