@@ -10,7 +10,12 @@ Download the latest build from [GitHub Releases](https://github.com/shikharish/c
 - macOS: choose the Apple Silicon or Intel build
 - Linux: `CV++-linux-amd64.AppImage`
 
-Releases are currently unsigned. Windows SmartScreen and macOS Gatekeeper may require a one-time confirmation.
+### First launch warnings
+
+Releases are currently unsigned. Only bypass these warnings for a file downloaded from the official release page:
+
+- macOS: in Finder, Control-click (or right-click) CV++, choose **Open**, then confirm **Open**.
+- Windows: select **More info**, then **Run anyway** in SmartScreen.
 
 ## Use
 
