@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>IIT KGP ERP CV Portal</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">IIT KGP ERP</p>
+        <h1>CV Portal</h1>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-actions" aria-label="Resume file actions">
+          <button id="save-json" class="button primary">Save</button>
+          <button id="open-json" class="button secondary">Open JSON</button>
+          <button id="download-json" class="button secondary">Download copy</button>
+          <button id="import-snapshot" class="button secondary">Import portal snapshot</button>
+        </div>
+
+        <section id="server-panel" class="server-panel" hidden>
+          <div class="panel-heading">
+            <strong>Local workflow</strong>
+            <span>Server mode</span>
+          </div>
+          <label class="field compact">
+            <span class="field-label">ERP PDF</span>
+            <select id="erp-cv" class="select">
+              <option value="1">CV1</option>
+              <option value="2">CV2</option>
+              <option value="3">CV3</option>
+            </select>
+          </label>
+          <label class="check server-check">
+            <input id="erp-fresh-login" type="checkbox">
+            Fresh login
+          </label>
+          <button id="open-pdf-viewer" class="button secondary">Open PDF Viewer</button>
+          <button id="open-erp" class="button secondary">Open ERP</button>
+          <button id="run-erp" class="button primary">Sync + download PDF</button>
+          <pre id="erp-log" class="erp-log" hidden></pre>
+        </section>
+
+        <nav id="navigation" aria-label="Resume sections">
+          <button data-view="entries" class="nav-item active"><span>Entries</span><strong id="entry-count">0</strong></button>
+          <button data-view="academics" class="nav-item"><span>Academics</span></button>
+          <button data-view="variants" class="nav-item"><span>CV variants</span></button>
+          <button data-view="shared" class="nav-item"><span>Shared sections</span></button>
+          <button data-view="preview" class="nav-item"><span>Preview</span></button>
+        </nav>
+
+        <div class="document-status">
+          <span id="dirty-indicator" class="status-dot"></span>
+          <div>
+            <strong id="document-name">No document open</strong>
+            <span id="save-status">Open data/resume.json to begin.</span>
+          </div>
+        </div>
+
+        <div id="validation-summary" class="validation-summary" hidden></div>
+      </aside>
+
+      <main id="workspace" class="workspace" tabindex="-1"></main>
+    </div>
+
+    <input id="json-file-input" type="file" accept="application/json,.json" hidden>
+    <input id="snapshot-file-input" type="file" accept="text/html,.html,.htm,.jsp" hidden>
+
+    <dialog id="message-dialog">
+      <form method="dialog">
+        <h2 id="dialog-title">Message</h2>
+        <div id="dialog-body"></div>
+        <div class="dialog-actions">
+          <button class="button primary" value="close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="core.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

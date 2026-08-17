@@ -1,0 +1,19 @@
+.DS_Store
+
+# Local build output
+/erp-cv-portal
+
+# Student-specific resume data and generated PDFs
+/data/resume.json
+/pdf/
+*.pdf
+
+# ERP credentials, sessions, and optional Gmail OAuth files
+/.erp-cv-secrets/
+
+# Debug/saved portal pages
+/.resume-debug/
+/StudentForm.jsp
+/view-source_*erp*.htm
+/cvGenerate*.pdf
+

@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "name": "Example Student",
+    "documentId": "example-resume",
+    "updatedAt": "2026-08-17"
+  },
+  "academics": {
+    "previous": [
+      {
+        "slot": 1,
+        "standard": "2024",
+        "qualification": "CBSE",
+        "institution": "Example Public School",
+        "completionYear": "2024",
+        "specialization": "",
+        "score": {
+          "kind": "percentage",
+          "value": "95",
+          "outOf": ""
+        }
+      }
+    ],
+    "current": {
+      "slot": 6,
+      "standard": "",
+      "qualification": "B.Tech.",
+      "institution": "IIT Kharagpur",
+      "completionYear": "2028",
+      "specialization": "Computer Science and Engineering",
+      "score": {
+        "kind": "cgpa",
+        "value": "9.00",
+        "outOf": "10"
+      }
+    }
+  },
+  "shared": {
+    "courseworkHtml": "<p>Algorithms and Data Structures, Operating Systems, Database Management Systems</p>"
+  },
+  "variants": [
+    {
+      "id": "cv1",
+      "label": "CV1",
+      "sectionOrder": [
+        "Internship",
+        "Project",
+        "Academic Achievement",
+        "skill",
+        "coursework",
+        "Position of Responsibilities"
+      ],
+      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript</p><p><strong>Tools:</strong> Git, Linux, Docker</p>",
+      "extracurricularHtml": "",
+      "showMinor": false,
+      "showMicro": false
+    },
+    {
+      "id": "cv2",
+      "label": "CV2",
+      "sectionOrder": [
+        "Internship",
+        "Project",
+        "Academic Achievement",
+        "skill",
+        "coursework",
+        "Position of Responsibilities"
+      ],
+      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript</p><p><strong>Tools:</strong> Git, Linux, Docker</p>",
+      "extracurricularHtml": "",
+      "showMinor": false,
+      "showMicro": false
+    },
+    {
+      "id": "cv3",
+      "label": "CV3",
+      "sectionOrder": [
+        "Internship",
+        "Project",
+        "Academic Achievement",
+        "skill",
+        "coursework",
+        "Position of Responsibilities"
+      ],
+      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript</p><p><strong>Tools:</strong> Git, Linux, Docker</p>",
+      "extracurricularHtml": "",
+      "showMinor": false,
+      "showMicro": false
+    }
+  ],
+  "entries": [
+    {
+      "id": "example-internship",
+      "type": "Internship",
+      "overview": "Example Company | Software Engineering Intern | May 2026 - July 2026",
+      "details": [
+        {
+          "kind": "bullet",
+          "html": "Built a production feature using C++, Linux, and Git, improving workflow reliability for the team."
+        },
+        {
+          "kind": "bullet",
+          "html": "Collaborated with engineers through code reviews, debugging sessions, and weekly design discussions."
+        }
+      ],
+      "includeIn": [
+        "cv1",
+        "cv2",
+        "cv3"
+      ]
+    },
+    {
+      "id": "example-project",
+      "type": "Project",
+      "overview": "Example Systems Project | C++, Linux | Jan 2026 - Feb 2026",
+      "details": [
+        {
+          "kind": "bullet",
+          "html": "Implemented a multithreaded C++ service with structured logging, benchmarking, and deterministic tests."
+        },
+        {
+          "kind": "bullet",
+          "html": "Optimized hot paths using profiling data, reducing request latency in the benchmark workload."
+        }
+      ],
+      "includeIn": [
+        "cv1",
+        "cv2",
+        "cv3"
+      ]
+    },
+    {
+      "id": "example-achievement",
+      "type": "Academic Achievement",
+      "overview": "Academic and Competitive Programming Achievements",
+      "details": [
+        {
+          "kind": "bullet",
+          "html": "Secured a strong rank in a national-level competitive examination."
+        }
+      ],
+      "includeIn": [
+        "cv1",
+        "cv2",
+        "cv3"
+      ]
+    },
+    {
+      "id": "example-por",
+      "type": "Position of Responsibilities",
+      "overview": "Example Student Society | Member",
+      "details": [
+        {
+          "kind": "bullet",
+          "html": "Organized technical sessions and coordinated project work with a student team."
+        }
+      ],
+      "includeIn": [
+        "cv1",
+        "cv2",
+        "cv3"
+      ]
+    }
+  ]
+}

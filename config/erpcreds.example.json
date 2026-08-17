@@ -1,0 +1,7 @@
+{
+  "roll_number": "23XX00000",
+  "password": "YOUR_ERP_PASSWORD",
+  "answers": {
+    "Exact security question shown by ERP": "YOUR_SECURITY_ANSWER"
+  }
+}
