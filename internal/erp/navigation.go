@@ -54,6 +54,9 @@ func (c *Client) validateTrainingPlacementAccess(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open ERP CDC menu: %w", err)
 	}
+	if token := strings.TrimSpace(values.Get("ssoToken")); token != "" {
+		c.sessionToken = token
+	}
 	actionURL, err := resolveTrustedAction(c.BaseURL+"/IIT_ERP3/showmenu.htm", action, c.BaseURL)
 	if err != nil {
 		return fmt.Errorf("open ERP CDC menu: %w", err)

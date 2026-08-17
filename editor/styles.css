@@ -45,6 +45,20 @@ body {
 .setup-kicker { margin: 0 0 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .setup-card h2 { margin: 0 0 8px; font-size: 22px; }
 .setup-privacy { margin: 0 0 20px; color: var(--muted); line-height: 1.5; }
+.saved-login-panel { margin: -4px 0 4px; }
+.saved-login-panel > p { margin: 0 0 12px; line-height: 1.45; }
+.saved-login-panel dl { margin: 0; border: 1px solid var(--line); border-radius: 6px; }
+.saved-login-panel dl div { display: flex; justify-content: space-between; gap: 16px; padding: 9px 11px; }
+.saved-login-panel dl div + div { border-top: 1px solid var(--line); }
+.saved-login-panel dt { color: var(--muted); }
+.saved-login-panel dd { margin: 0; color: var(--green); font-weight: 700; text-align: right; }
+.security-answer-panel h3 { margin: 0 0 6px; }
+.security-answer-panel > p { margin: 0 0 14px; color: var(--muted); line-height: 1.45; }
+.security-question { margin-bottom: 14px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); }
+.security-question span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.security-question strong { line-height: 1.4; }
+#security-answer-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.security-answer-panel .setup-error { margin-top: 12px; }
 #setup-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .setup-card .field { grid-column: auto; min-width: 0; }
 .setup-question-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; min-width: 0; }

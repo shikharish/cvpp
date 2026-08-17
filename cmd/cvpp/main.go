@@ -87,7 +87,7 @@ func parseAppFlags(args []string) appOptions {
 	flags := flag.NewFlagSet("cvpp", flag.ExitOnError)
 	options := appOptions{open: true}
 	flags.StringVar(&options.dataDir, "data-dir", "", "application data directory (advanced)")
-	flags.BoolVar(&options.open, "open", true, "open the app in the default browser")
+	flags.BoolVar(&options.open, "open", true, "open the app in a standalone browser window")
 	_ = flags.Parse(args)
 	return options
 }
@@ -99,7 +99,7 @@ func parseEditorFlags(args []string) editorOptions {
 	flags.StringVar(&options.jsonPath, "json", "data/resume.json", "resume JSON path")
 	flags.StringVar(&options.secretsDir, "secrets-dir", ".erp-cv-secrets", "ERP credentials and session directory")
 	flags.StringVar(&options.baseURL, "base-url", erp.DefaultBaseURL, "ERP base URL")
-	flags.BoolVar(&options.open, "open", true, "open the editor in the default browser")
+	flags.BoolVar(&options.open, "open", true, "open the editor in a standalone browser window")
 	flags.StringVar(&options.dataDir, "data-dir", "", "application data directory (advanced)")
 	noOpen := flags.Bool("no-open", false, "print the editor URL without opening a browser")
 	_ = flags.Parse(args)

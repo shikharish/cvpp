@@ -15,30 +15,38 @@ import (
 )
 
 type ERPOptions struct {
-	Variant      int
-	JSONPath     string
-	Output       string
-	SecretsDir   string
-	BaseURL      string
-	DownloadOnly bool
-	FreshLogin   bool
-	OTP          erp.OTPProvider
-	Phase        func(string)
+	Variant       int
+	JSONPath      string
+	Output        string
+	SecretsDir    string
+	BaseURL       string
+	DownloadOnly  bool
+	FreshLogin    bool
+	OTP           erp.OTPProvider
+	Answers       erp.SecurityAnswerProvider
+	Phase         func(string)
+	Authenticated func(*erp.Client)
 }
 
 type ImportOptions struct {
-	Paths      appdata.Paths
-	BaseURL    string
-	FreshLogin bool
-	OTP        erp.OTPProvider
-	Phase      func(string)
+	Paths         appdata.Paths
+	BaseURL       string
+	FreshLogin    bool
+	OTP           erp.OTPProvider
+	Answers       erp.SecurityAnswerProvider
+	Phase         func(string)
+	Authenticated func(*erp.Client)
 }
 
 type ERPBrowserOptions struct {
-	SecretsDir string
-	BaseURL    string
-	FreshLogin bool
-	OpenURL    func(string) error
+	SecretsDir    string
+	BaseURL       string
+	FreshLogin    bool
+	OpenURL       func(string) error
+	OTP           erp.OTPProvider
+	Answers       erp.SecurityAnswerProvider
+	Phase         func(string)
+	Authenticated func(*erp.Client)
 }
 
 func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
@@ -75,6 +83,7 @@ func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
 	if options.OTP != nil {
 		client.OTP = options.OTP
 	}
+	client.SecurityAnswers = options.Answers
 	client.Phase = options.Phase
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -90,6 +99,9 @@ func RunERP(ctx context.Context, repoRoot string, options ERPOptions) error {
 	}
 	if authErr != nil {
 		return authErr
+	}
+	if options.Authenticated != nil {
+		options.Authenticated(client)
 	}
 
 	if !options.DownloadOnly {
@@ -138,6 +150,7 @@ func ImportPortal(ctx context.Context, options ImportOptions) error {
 	if options.OTP != nil {
 		client.OTP = options.OTP
 	}
+	client.SecurityAnswers = options.Answers
 	client.Phase = options.Phase
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -148,6 +161,9 @@ func ImportPortal(ctx context.Context, options ImportOptions) error {
 		}
 	} else if err := client.Authenticate(ctx); err != nil {
 		return err
+	}
+	if options.Authenticated != nil {
+		options.Authenticated(client)
 	}
 	phase("importing")
 	snapshot, err := client.FetchResumeForm(ctx)
@@ -205,6 +221,11 @@ func OpenERPBrowser(ctx context.Context, repoRoot string, options ERPBrowserOpti
 	if err != nil {
 		return err
 	}
+	if options.OTP != nil {
+		client.OTP = options.OTP
+	}
+	client.SecurityAnswers = options.Answers
+	client.Phase = options.Phase
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -218,6 +239,9 @@ func OpenERPBrowser(ctx context.Context, repoRoot string, options ERPBrowserOpti
 	browserURL, err := client.BrowserLoginURL(ctx)
 	if err != nil {
 		return err
+	}
+	if options.Authenticated != nil {
+		options.Authenticated(client)
 	}
 	progress.Logf("ERP CV: opening the fresh ERP session in the browser")
 	if err := options.OpenURL(browserURL); err != nil {

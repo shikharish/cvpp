@@ -16,9 +16,27 @@
 
     <section id="setup-overlay" class="setup-overlay" hidden aria-labelledby="setup-title">
       <div class="setup-card">
-        <p class="setup-kicker">Local setup</p>
+        <p id="setup-kicker" class="setup-kicker">Local setup</p>
         <h2 id="setup-title">Connect your IIT KGP ERP account</h2>
-        <p class="setup-privacy">Your login and resume stay on this computer. CV++ connects directly to IIT KGP ERP.</p>
+        <p id="setup-privacy" class="setup-privacy">Your login and resume stay on this computer. CV++ connects directly to IIT KGP ERP.</p>
+        <div id="saved-login-panel" class="saved-login-panel" hidden>
+          <p>Your saved ERP login is being reused securely from this computer.</p>
+          <dl>
+            <div><dt>Roll number and password</dt><dd>Saved</dd></div>
+            <div><dt>Security question</dt><dd>Fetched automatically</dd></div>
+            <div><dt>Matching answer</dt><dd>Filled from saved answers</dd></div>
+          </dl>
+        </div>
+        <div id="security-answer-panel" class="security-answer-panel" hidden>
+          <h3>Answer this question once</h3>
+          <p>ERP selected a question that CV++ has not saved yet. Its answer will stay only on this computer.</p>
+          <div class="security-question"><span>Security question</span><strong id="security-answer-question"></strong></div>
+          <form id="security-answer-form">
+            <label class="field"><span>Answer</span><input id="security-answer-input" class="input" type="password" autocomplete="off" required></label>
+            <button class="button primary" type="submit">Save answer and continue</button>
+          </form>
+          <p id="security-answer-error" class="setup-error" hidden></p>
+        </div>
         <form id="setup-form">
           <label class="field"><span>ERP roll number</span><input id="setup-roll" class="input" autocomplete="username" required></label>
           <label class="field"><span>ERP password</span><input id="setup-password" class="input" type="password" autocomplete="current-password" required></label>

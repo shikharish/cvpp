@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type staticOTP string
@@ -84,6 +85,116 @@ func TestAuthenticateStopsWhenERPRejectsOTPRequest(t *testing.T) {
 	}
 }
 
+func TestLoginChallengeMatchesStoredQuestionIgnoringCaseAndWhitespace(t *testing.T) {
+	secrets := t.TempDir()
+	credentials, _ := json.Marshal(map[string]any{
+		"roll_number": "23XX00000",
+		"password":    "password",
+		"answers":     map[string]string{"  What Is   Your Pet Name?  ": "fluffy"},
+	})
+	if err := os.WriteFile(filepath.Join(secrets, "erpcreds.json"), credentials, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/SSOAdministration/getSecurityQues.htm" {
+			t.Errorf("unexpected request to %s", request.URL.Path)
+			http.NotFound(writer, request)
+			return
+		}
+		fmt.Fprint(writer, "what is your pet name?")
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := client.loginChallenge(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if challenge.Answer != "fluffy" {
+		t.Fatalf("answer = %q, want fluffy", challenge.Answer)
+	}
+}
+
+func TestNewSecurityAnswerIsCollectedAndSavedAfterERPAcceptsIt(t *testing.T) {
+	secrets := t.TempDir()
+	credentials, _ := json.Marshal(map[string]any{
+		"roll_number": "23XX00000",
+		"password":    "password",
+		"answers":     map[string]string{"Known question?": "known answer"},
+	})
+	path := filepath.Join(secrets, "erpcreds.json")
+	if err := os.WriteFile(path, credentials, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/SSOAdministration/getSecurityQues.htm":
+			fmt.Fprint(writer, "New question?")
+		case "/SSOAdministration/getEmilOTP.htm":
+			if got := request.FormValue("answer"); got != "new answer" {
+				t.Errorf("submitted answer = %q", got)
+			}
+			fmt.Fprint(writer, `{"msg":"An OTP has been sent"}`)
+		default:
+			t.Errorf("unexpected request to %s", request.URL.Path)
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers := NewInteractiveSecurityAnswer()
+	client.SecurityAnswers = answers
+	client.OTP = staticOTP("123456")
+	type challengeResult struct {
+		challenge *loginChallenge
+		err       error
+	}
+	result := make(chan challengeResult, 1)
+	go func() {
+		challenge, challengeErr := client.loginChallenge(context.Background(), "test")
+		result <- challengeResult{challenge: challenge, err: challengeErr}
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		question, waiting := answers.Current()
+		if waiting {
+			if question != "New question?" {
+				t.Fatalf("question = %q", question)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("security answer provider did not start waiting")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := answers.Submit("new answer"); err != nil {
+		t.Fatal(err)
+	}
+	challengeResponse := <-result
+	if challengeResponse.err != nil {
+		t.Fatal(challengeResponse.err)
+	}
+	if _, err := client.requestAndWaitOTP(context.Background(), "test", challengeResponse.challenge); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Answers["Known question?"] != "known answer" || saved.Answers["New question?"] != "new answer" {
+		t.Fatalf("saved answers = %#v", saved.Answers)
+	}
+}
+
 func TestAuthenticateAndReuseSession(t *testing.T) {
 	secrets := t.TempDir()
 	credentials, _ := json.Marshal(map[string]any{
@@ -150,6 +261,59 @@ func TestAuthenticateAndReuseSession(t *testing.T) {
 	}
 	if loginCount != 2 {
 		t.Fatal("fresh login did not discard the saved session")
+	}
+}
+
+func TestRestoreSavedSessionAndKeepAliveUsesApplicationCookies(t *testing.T) {
+	secrets := t.TempDir()
+	if err := os.WriteFile(filepath.Join(secrets, ".session"), []byte("ssoToken=session-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keepAliveCalls := 0
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/IIT_ERP3/":
+			if request.URL.Query().Get("ssoToken") != "session-token" {
+				t.Errorf("missing saved session token")
+			}
+			http.SetCookie(writer, &http.Cookie{Name: "JSID_IIT_ERP3", Value: "application-session", Path: "/"})
+			fmt.Fprint(writer, `<title>Welcome Test Student to ERP</title><script src="getModules.htm"></script>`)
+		case "/IIT_ERP3/showmenu.htm":
+			fmt.Fprint(writer, `<form id="menuform" method="post" action="../TrainingPlacementSSO/TPStudent.jsp"><input name="ssoToken" value="session-token"></form>`)
+		case "/TrainingPlacementSSO/TPStudent.jsp":
+			fmt.Fprint(writer, `<a href="StudentForm.jsp">Profile</a><script>url = "cvGenerate.jsp"</script>`)
+		case "/IIT_ERP3/keepAlive.htm":
+			keepAliveCalls++
+			if request.Header.Get("X-Requested-With") != "XMLHttpRequest" {
+				t.Errorf("missing XMLHttpRequest header")
+			}
+			if request.Referer() != server.URL+"/IIT_ERP3/showmenu.htm" {
+				t.Errorf("referer = %q", request.Referer())
+			}
+			if cookie, err := request.Cookie("JSID_IIT_ERP3"); err != nil || cookie.Value != "application-session" {
+				t.Errorf("keep-alive did not reuse ERP application cookie")
+			}
+			fmt.Fprint(writer, "OK")
+		default:
+			t.Errorf("unexpected request to %s", request.URL.Path)
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RestoreSavedSession(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.KeepAlive(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if keepAliveCalls != 1 {
+		t.Fatalf("keep-alive calls = %d", keepAliveCalls)
 	}
 }
 

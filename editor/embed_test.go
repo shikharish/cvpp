@@ -25,6 +25,71 @@ func TestSetupFieldsDoNotUseEditorGridColumns(t *testing.T) {
 	}
 }
 
+func TestExpiredSessionPromptsOnlyForOTP(t *testing.T) {
+	index, err := Files.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), `id="saved-login-panel"`) {
+		t.Fatal("expired-session dialog must explain that saved login details are being reused")
+	}
+	if !strings.Contains(string(app), "function showSavedLogin(show, onboarding)") || !strings.Contains(string(app), "showSavedLogin(canReuseSavedLogin, savedLoginIsOnboarding)") {
+		t.Fatal("expired-session flow must hide the login form and show only the OTP prompt")
+	}
+}
+
+func TestOnboardingAutomaticallyReusesSavedCredentials(t *testing.T) {
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	if !strings.Contains(content, "async function importWithSavedCredentials()") {
+		t.Fatal("onboarding must be able to import with backend-saved credentials")
+	}
+	if !strings.Contains(content, "status.onboarding && canReuseSavedLogin") || !strings.Contains(content, "await importWithSavedCredentials()") {
+		t.Fatal("first start with saved credentials must begin import automatically")
+	}
+	if !strings.Contains(content, `JSON.stringify({ freshLogin: false })`) {
+		t.Fatal("saved-credential onboarding must reuse a valid existing ERP session when available")
+	}
+}
+
+func TestUnknownSecurityQuestionCanBeAnsweredWithoutReenteringLogin(t *testing.T) {
+	index, err := Files.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), `id="security-answer-panel"`) || !strings.Contains(string(index), `id="security-answer-form"`) {
+		t.Fatal("unknown security questions must use a dedicated answer-only form")
+	}
+	if !strings.Contains(string(app), `apiFetch("/api/erp/security-answer"`) || !strings.Contains(string(app), "status.securityAnswerRequired") {
+		t.Fatal("answer-only form must resume the waiting ERP login")
+	}
+}
+
+func TestCurrentCGPAIsReadOnly(t *testing.T) {
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	if !strings.Contains(content, `readonly aria-readonly="true" title="Fetched from the ERP student profile"`) {
+		t.Fatal("current CGPA must be rendered as an ERP-managed read-only field")
+	}
+	if !strings.Contains(content, "if (!current) {") {
+		t.Fatal("current CGPA controls must not bind editing handlers")
+	}
+}
+
 func TestPDFPreviewUsesResizableSplitAndBlobRefresh(t *testing.T) {
 	index, err := Files.ReadFile("index.html")
 	if err != nil {

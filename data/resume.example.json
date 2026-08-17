@@ -9,14 +9,27 @@
     "previous": [
       {
         "slot": 1,
-        "standard": "2024",
-        "qualification": "CBSE",
-        "institution": "Example Public School",
+        "standard": "Class XII",
+        "qualification": "Example Senior Secondary Examination",
+        "institution": "Placeholder Senior Secondary School",
         "completionYear": "2024",
+        "specialization": "Science",
+        "score": {
+          "kind": "percentage",
+          "value": "95.0",
+          "outOf": ""
+        }
+      },
+      {
+        "slot": 2,
+        "standard": "Class X",
+        "qualification": "Example Secondary Examination",
+        "institution": "Placeholder Public School",
+        "completionYear": "2022",
         "specialization": "",
         "score": {
           "kind": "percentage",
-          "value": "95",
+          "value": "96.0",
           "outOf": ""
         }
       }
@@ -24,7 +37,7 @@
     "current": {
       "slot": 6,
       "standard": "",
-      "qualification": "B.Tech.",
+      "qualification": "B.Tech. (Hons.)",
       "institution": "IIT Kharagpur",
       "completionYear": "2028",
       "specialization": "Computer Science and Engineering",
@@ -36,7 +49,7 @@
     }
   },
   "shared": {
-    "courseworkHtml": "<p>Algorithms and Data Structures, Operating Systems, Database Management Systems</p>"
+    "courseworkHtml": "<p><strong>Computer Science:</strong> Data Structures and Algorithms, Operating Systems, Database Management Systems, Computer Networks, Machine Learning</p><p><strong>Mathematics:</strong> Linear Algebra, Probability and Statistics, Discrete Mathematics, Optimization</p>"
   },
   "variants": [
     {
@@ -44,14 +57,21 @@
       "label": "CV1",
       "sectionOrder": [
         "Internship",
+        "Experience",
         "Project",
         "Academic Achievement",
+        "Competition/Conference",
+        "Publication",
+        "Certification",
+        "Training",
+        "Entrepreneurial",
         "skill",
         "coursework",
-        "Position of Responsibilities"
+        "Position of Responsibilities",
+        "eaa"
       ],
-      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript</p><p><strong>Tools:</strong> Git, Linux, Docker</p>",
-      "extracurricularHtml": "",
+      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript, SQL</p><p><strong>Frameworks:</strong> React, Node.js, FastAPI</p><p><strong>Tools:</strong> Git, Linux, Docker, PostgreSQL</p>",
+      "extracurricularHtml": "<p><strong>Technology:</strong> Mentored first-year students during a placeholder programming workshop.</p><p><strong>Interests:</strong> Competitive programming, technical writing, and open-source software.</p>",
       "showMinor": false,
       "showMicro": false
     },
@@ -59,15 +79,19 @@
       "id": "cv2",
       "label": "CV2",
       "sectionOrder": [
-        "Internship",
         "Project",
+        "Internship",
+        "Publication",
+        "Competition/Conference",
         "Academic Achievement",
         "skill",
         "coursework",
-        "Position of Responsibilities"
+        "Certification",
+        "Position of Responsibilities",
+        "eaa"
       ],
-      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript</p><p><strong>Tools:</strong> Git, Linux, Docker</p>",
-      "extracurricularHtml": "",
+      "skillsHtml": "<p><strong>Programming:</strong> C++, Python, JavaScript</p><p><strong>Systems:</strong> Linux, networking, concurrency, profiling</p><p><strong>Data:</strong> PostgreSQL, data analysis, machine learning fundamentals</p>",
+      "extracurricularHtml": "<p>Contributed documentation and beginner-friendly fixes to a fictional student open-source collective.</p>",
       "showMinor": false,
       "showMicro": false
     },
@@ -75,15 +99,19 @@
       "id": "cv3",
       "label": "CV3",
       "sectionOrder": [
+        "Experience",
+        "Entrepreneurial",
+        "Position of Responsibilities",
         "Internship",
         "Project",
+        "Competition/Conference",
         "Academic Achievement",
         "skill",
         "coursework",
-        "Position of Responsibilities"
+        "eaa"
       ],
-      "skillsHtml": "<p><strong>Languages:</strong> C++, Python, JavaScript</p><p><strong>Tools:</strong> Git, Linux, Docker</p>",
-      "extracurricularHtml": "",
+      "skillsHtml": "<p><strong>Product:</strong> Requirements analysis, prototyping, user research</p><p><strong>Technical:</strong> Python, JavaScript, SQL, Git</p><p><strong>Collaboration:</strong> Documentation, presentations, project coordination</p>",
+      "extracurricularHtml": "<p><strong>Community:</strong> Volunteered at a fictional campus learning initiative and helped organize two example events.</p><p><strong>Activities:</strong> Quizzing, badminton, and design.</p>",
       "showMinor": false,
       "showMicro": false
     }
@@ -96,7 +124,11 @@
       "details": [
         {
           "kind": "bullet",
-          "html": "Built a production feature using C++, Linux, and Git, improving workflow reliability for the team."
+          "html": "Built a production-style service using <strong>C++</strong>, Linux, and PostgreSQL, reducing the example benchmark latency by <strong>35%</strong>."
+        },
+        {
+          "kind": "bullet",
+          "html": "Added structured logging, monitoring dashboards, and automated checks for a fictional workflow used by 20 sample users."
         },
         {
           "kind": "bullet",
@@ -110,33 +142,41 @@
       ]
     },
     {
-      "id": "example-project",
+      "id": "example-systems-project",
       "type": "Project",
-      "overview": "Example Systems Project | C++, Linux | Jan 2026 - Feb 2026",
+      "overview": "Distributed Job Scheduler | C++, Linux | Jan 2026 - Feb 2026",
       "details": [
         {
           "kind": "bullet",
-          "html": "Implemented a multithreaded C++ service with structured logging, benchmarking, and deterministic tests."
+          "html": "Implemented a multithreaded scheduler with retry handling, structured logs, and deterministic tests."
         },
         {
           "kind": "bullet",
-          "html": "Optimized hot paths using profiling data, reducing request latency in the benchmark workload."
+          "html": "Profiled critical paths and improved throughput by <strong>2.4x</strong> on a synthetic workload."
+        },
+        {
+          "kind": "paragraph",
+          "html": "<em>Placeholder project:</em> all metrics and users in this example are fictional.",
+          "gapBefore": 4
         }
       ],
       "includeIn": [
         "cv1",
-        "cv2",
-        "cv3"
+        "cv2"
       ]
     },
     {
       "id": "example-achievement",
       "type": "Academic Achievement",
-      "overview": "Academic and Competitive Programming Achievements",
+      "overview": "Academic Achievements",
       "details": [
         {
           "kind": "bullet",
-          "html": "Secured a strong rank in a national-level competitive examination."
+          "html": "Received an example institute merit recognition for strong academic performance."
+        },
+        {
+          "kind": "bullet",
+          "html": "Placed in the top <strong>5%</strong> of a fictional national programming assessment."
         }
       ],
       "includeIn": [
@@ -148,11 +188,15 @@
     {
       "id": "example-por",
       "type": "Position of Responsibilities",
-      "overview": "Example Student Society | Member",
+      "overview": "Example Technology Society | Events Coordinator | 2025 - 2026",
       "details": [
         {
           "kind": "bullet",
-          "html": "Organized technical sessions and coordinated project work with a student team."
+          "html": "Coordinated four fictional technical sessions for 150 sample participants with a ten-member student team."
+        },
+        {
+          "kind": "bullet",
+          "html": "Created reusable planning templates and reduced example event preparation time by 30%."
         }
       ],
       "includeIn": [

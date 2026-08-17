@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	PortalFontSize = 9
+	PortalFontSize = 10
 	MaxGapPixels   = 24
 )
 

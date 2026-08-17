@@ -36,3 +36,24 @@ func TestBrowserCommandRejectsUnsupportedOS(t *testing.T) {
 		t.Fatal("unsupported OS was accepted")
 	}
 }
+
+func TestEditorAppCommandsUseStandaloneWindow(t *testing.T) {
+	url := "http://127.0.0.1:1234/bootstrap?token=one-time"
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		commands := editorAppCommands(goos, url)
+		if len(commands) == 0 {
+			t.Fatalf("no app-window command for %s", goos)
+		}
+		found := false
+		for _, command := range commands {
+			for _, argument := range command.args {
+				if argument == "--app="+url {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s commands do not use browser app mode: %#v", goos, commands)
+		}
+	}
+}

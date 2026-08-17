@@ -35,7 +35,7 @@
   const SECTION_VALUES = SECTION_OPTIONS.map((option) => option.value);
   const VARIANT_IDS = ["cv1", "cv2", "cv3"];
   const DRAFT_KEY = "cvpp-draft-v1";
-  const PORTAL_FONT_SIZE = 9;
+  const PORTAL_FONT_SIZE = 10;
   const MAX_GAP_PIXELS = 24;
 
   function clone(value) {

@@ -52,6 +52,8 @@ type Server struct {
 	shutdown       context.CancelFunc
 	instance       *appdata.Instance
 	otp            *erp.InteractiveOTP
+	securityAnswer *erp.InteractiveSecurityAnswer
+	keepAlive      *sessionKeeper
 	events         *eventHub
 	jobs           *jobRunner
 }
@@ -97,14 +99,16 @@ func Serve(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
-	server := &Server{options: options, paths: paths, host: listener.Addr().String(), bootstrapToken: bootstrapToken, sessionToken: sessionToken, events: newEventHub(), otp: erp.NewInteractiveOTP(), lastActivity: time.Now()}
+	server := &Server{options: options, paths: paths, host: listener.Addr().String(), bootstrapToken: bootstrapToken, sessionToken: sessionToken, events: newEventHub(), otp: erp.NewInteractiveOTP(), securityAnswer: erp.NewInteractiveSecurityAnswer(), lastActivity: time.Now()}
 	server.jobs = &jobRunner{server: server}
+	server.keepAlive = newSessionKeeper(10 * time.Minute)
 	instance, err := appdata.AcquireInstance(paths, appdata.RuntimeState{PID: os.Getpid(), Port: listener.Addr().(*net.TCPAddr).Port, StartedAt: time.Now().UTC(), URL: "http://" + listener.Addr().String() + "/"})
 	if err != nil {
 		return err
 	}
 	server.instance = instance
 	defer instance.Close()
+	defer server.securityAnswer.Close()
 
 	mux := http.NewServeMux()
 	server.routes(mux)
@@ -112,6 +116,18 @@ func Serve(ctx context.Context, options Options) error {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	server.shutdown = cancel
+	go server.keepAlive.Run(requestCtx, func() bool { return server.jobs.isRunning() }, func() (*erp.Client, error) {
+		client, clientErr := erp.New(server.options.BaseURL, server.resolve(server.options.SecretsDir))
+		if clientErr != nil {
+			return nil, clientErr
+		}
+		restoreCtx, restoreCancel := context.WithTimeout(requestCtx, 45*time.Second)
+		defer restoreCancel()
+		if restoreErr := client.RestoreSavedSession(restoreCtx); restoreErr != nil {
+			return nil, restoreErr
+		}
+		return client, nil
+	})
 	httpServer := &http.Server{Handler: securityHeaders(server, mux)}
 	errc := make(chan error, 1)
 	go func() {
@@ -149,6 +165,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/setup/credentials", s.requireToken(s.handleCredentials))
 	mux.HandleFunc("/api/setup/import", s.requireToken(s.handleImport))
 	mux.HandleFunc("/api/erp/otp", s.requireToken(s.handleOTP))
+	mux.HandleFunc("/api/erp/security-answer", s.requireToken(s.handleSecurityAnswer))
 	mux.HandleFunc("/api/resume", s.requireToken(s.handleResume))
 	mux.HandleFunc("/api/erp/open", s.requireToken(s.handleERPOpen))
 	mux.HandleFunc("/api/erp/run", s.requireToken(s.handleERPRun))
@@ -281,10 +298,12 @@ func (s *Server) handleAppStatus(w http.ResponseWriter, r *http.Request) {
 		pdfs = append(pdfs, item)
 	}
 	job := s.jobs.status()
+	securityQuestion, securityAnswerRequired := s.securityAnswer.Current()
 	writeJSON(w, map[string]any{
 		"ok": true, "version": version, "onboarding": !resumeExists || credentialErr != nil,
 		"credentials": credentialErr == nil, "session": sessionErr == nil, "resume": resumeExists,
 		"pdfs": pdfs, "jobRunning": job.Running, "job": job, "otpRequired": s.otp.Waiting(),
+		"securityAnswerRequired": securityAnswerRequired, "securityQuestion": securityQuestion,
 	})
 }
 
@@ -373,6 +392,25 @@ func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.otp.Submit(request.OTP); err != nil {
+		writeAPIError(w, err, http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "accepted": true})
+}
+
+func (s *Server) handleSecurityAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		Answer string `json:"answer"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&request); err != nil {
+		writeAPIError(w, errors.New("invalid security answer payload"), http.StatusBadRequest)
+		return
+	}
+	if err := s.securityAnswer.Submit(request.Answer); err != nil {
 		writeAPIError(w, err, http.StatusConflict)
 		return
 	}
@@ -793,15 +831,17 @@ func (j *jobRunner) start(cv int, freshLogin, downloadOnly bool) (uint64, error)
 		defer removeSink()
 
 		err := workflow.RunERP(context.Background(), j.server.options.RepoRoot, workflow.ERPOptions{
-			Variant:      cv,
-			JSONPath:     j.server.options.JSONPath,
-			Output:       j.server.pdfPath(cv),
-			SecretsDir:   j.server.options.SecretsDir,
-			BaseURL:      j.server.options.BaseURL,
-			DownloadOnly: downloadOnly,
-			FreshLogin:   freshLogin,
-			OTP:          j.otpForJob(),
-			Phase:        j.phase,
+			Variant:       cv,
+			JSONPath:      j.server.options.JSONPath,
+			Output:        j.server.pdfPath(cv),
+			SecretsDir:    j.server.options.SecretsDir,
+			BaseURL:       j.server.options.BaseURL,
+			DownloadOnly:  downloadOnly,
+			FreshLogin:    freshLogin,
+			OTP:           j.otpForJob(),
+			Answers:       j.securityAnswersForJob(),
+			Phase:         j.phase,
+			Authenticated: j.server.keepAlive.SetClient,
 		})
 		if err != nil {
 			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": "ERP failed: " + err.Error()}})
@@ -823,7 +863,7 @@ func (j *jobRunner) startImport(freshLogin bool) (uint64, error) {
 			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": line}})
 		})
 		defer removeSink()
-		err := workflow.ImportPortal(context.Background(), workflow.ImportOptions{Paths: j.server.paths, BaseURL: j.server.options.BaseURL, FreshLogin: freshLogin, OTP: j.server.otp, Phase: j.phase})
+		err := workflow.ImportPortal(context.Background(), workflow.ImportOptions{Paths: j.server.paths, BaseURL: j.server.options.BaseURL, FreshLogin: freshLogin, OTP: j.server.otp, Answers: j.server.securityAnswer, Phase: j.phase, Authenticated: j.server.keepAlive.SetClient})
 		if err != nil {
 			j.finish(false, "", friendlyError(err))
 			return
@@ -836,6 +876,13 @@ func (j *jobRunner) startImport(freshLogin bool) (uint64, error) {
 func (j *jobRunner) otpForJob() erp.OTPProvider {
 	if j.server.options.AppMode {
 		return j.server.otp
+	}
+	return nil
+}
+
+func (j *jobRunner) securityAnswersForJob() erp.SecurityAnswerProvider {
+	if j.server.options.AppMode {
+		return j.server.securityAnswer
 	}
 	return nil
 }
@@ -861,10 +908,14 @@ func (j *jobRunner) startOpen(freshLogin bool) (uint64, error) {
 		defer removeSink()
 
 		err := workflow.OpenERPBrowser(context.Background(), j.server.options.RepoRoot, workflow.ERPBrowserOptions{
-			SecretsDir: j.server.options.SecretsDir,
-			BaseURL:    j.server.options.BaseURL,
-			FreshLogin: freshLogin,
-			OpenURL:    j.server.options.OpenERPURL,
+			SecretsDir:    j.server.options.SecretsDir,
+			BaseURL:       j.server.options.BaseURL,
+			FreshLogin:    freshLogin,
+			OpenURL:       j.server.options.OpenERPURL,
+			OTP:           j.otpForJob(),
+			Answers:       j.securityAnswersForJob(),
+			Phase:         j.phase,
+			Authenticated: j.server.keepAlive.SetClient,
 		})
 		if err != nil {
 			j.server.events.broadcast(event{name: "log", data: map[string]any{"message": "ERP open failed: " + err.Error()}})

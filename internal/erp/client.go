@@ -41,7 +41,9 @@ type Client struct {
 	BaseURL                string
 	SecretsDir             string
 	OTP                    OTPProvider
+	SecurityAnswers        SecurityAnswerProvider
 	trainingPlacementReady bool
+	sessionToken           string
 	Phase                  func(string)
 }
 
@@ -56,6 +58,10 @@ type credentials = Credentials
 type OTPProvider interface {
 	Prepare(context.Context) error
 	Wait(context.Context) (string, error)
+}
+
+type SecurityAnswerProvider interface {
+	Wait(context.Context, string) (string, error)
 }
 
 func New(baseURL, secretsDir string) (*Client, error) {
@@ -89,6 +95,46 @@ func (c *Client) AuthenticateFresh(ctx context.Context) error {
 func (c *Client) DiscardSavedSession() error {
 	if err := os.Remove(filepath.Join(c.SecretsDir, ".session")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove saved ERP session: %w", err)
+	}
+	return nil
+}
+
+// RestoreSavedSession rebuilds the in-memory ERP cookie jar from the locally
+// saved SSO token and validates the associated application sessions.
+func (c *Client) RestoreSavedSession(ctx context.Context) error {
+	token, err := c.readSession()
+	if err != nil {
+		return err
+	}
+	if token == "" {
+		return fmt.Errorf("saved ERP session is empty")
+	}
+	c.installCookie(token)
+	return c.validateSession(ctx, token)
+}
+
+// KeepAlive refreshes an already-restored ERP session using the same endpoint
+// and request shape as the ERP web application. It never authenticates or
+// reads credentials when the session has expired.
+func (c *Client) KeepAlive(ctx context.Context) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/IIT_ERP3/keepAlive.htm", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "*/*")
+	request.Header.Set("Referer", c.BaseURL+"/IIT_ERP3/showmenu.htm")
+	request.Header.Set("X-Requested-With", "XMLHttpRequest")
+	response, err := c.HTTP.Do(request)
+	if err != nil {
+		return safeHTTPError(err)
+	}
+	body, readErr := readLimited(response.Body, 256<<10)
+	response.Body.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 || isAuthURL(response.Request.URL) || isDeniedPage(body) {
+		return fmt.Errorf("%w: ERP keep-alive was rejected", ErrSessionRejected)
 	}
 	return nil
 }
@@ -184,13 +230,21 @@ func (c *Client) authenticate(ctx context.Context, fresh bool) error {
 		return err
 	}
 	token := c.tokenFromResponse(response, body)
-	if token == "" {
-		return fmt.Errorf("ERP login did not return a session token")
+	if token != "" {
+		c.installCookie(token)
 	}
-	c.installCookie(token)
 	progress.Logf("ERP auth: validating the new login")
 	if err := c.validateLoginResponse(ctx, response, body, token); err != nil {
 		return fmt.Errorf("new ERP session is invalid: %w", err)
+	}
+	if token == "" {
+		token = c.sessionToken
+	}
+	if token == "" {
+		token = c.tokenFromJar()
+	}
+	if token == "" {
+		return fmt.Errorf("ERP login succeeded, but ERP did not expose a reusable session token")
 	}
 	if err := atomicWrite(filepath.Join(c.SecretsDir, ".session"), []byte("ssoToken="+token+"\n"), 0o600); err != nil {
 		return fmt.Errorf("save ERP session: %w", err)
@@ -201,7 +255,9 @@ func (c *Client) authenticate(ctx context.Context, fresh bool) error {
 
 type loginChallenge struct {
 	Credentials *credentials
+	Question    string
 	Answer      string
+	NewAnswer   bool
 }
 
 func (c *Client) loginChallenge(ctx context.Context, label string) (*loginChallenge, error) {
@@ -216,14 +272,41 @@ func (c *Client) loginChallenge(ctx context.Context, label string) (*loginChalle
 		return nil, fmt.Errorf("fetch ERP security question: %w", err)
 	}
 	question = strings.TrimSpace(question)
-	answer, ok := creds.Answers[question]
+	answer, ok := answerForQuestion(creds.Answers, question)
 	if !ok {
-		return nil, fmt.Errorf("erpcreds.json has no answer for the returned security question %q", question)
+		if c.SecurityAnswers == nil {
+			return nil, fmt.Errorf("erpcreds.json has no answer for the returned security question %q", question)
+		}
+		progress.Logf("%s: waiting for the answer to a new security question", label)
+		if c.Phase != nil {
+			c.Phase("security-answer-required")
+		}
+		answer, err = c.SecurityAnswers.Wait(ctx, question)
+		if err != nil {
+			return nil, fmt.Errorf("get ERP security answer: %w", err)
+		}
 	}
 	if strings.TrimSpace(answer) == "" {
 		return nil, fmt.Errorf("erpcreds.json has an empty answer for the returned security question %q", question)
 	}
-	return &loginChallenge{Credentials: creds, Answer: answer}, nil
+	return &loginChallenge{Credentials: creds, Question: question, Answer: answer, NewAnswer: !ok}, nil
+}
+
+func answerForQuestion(answers map[string]string, question string) (string, bool) {
+	if answer, ok := answers[question]; ok {
+		return answer, true
+	}
+	normalizedQuestion := normalizeSecurityQuestion(question)
+	for savedQuestion, answer := range answers {
+		if normalizeSecurityQuestion(savedQuestion) == normalizedQuestion {
+			return answer, true
+		}
+	}
+	return "", false
+}
+
+func normalizeSecurityQuestion(question string) string {
+	return strings.ToLower(strings.Join(strings.Fields(question), " "))
 }
 
 func (c *Client) requestAndWaitOTP(ctx context.Context, label string, challenge *loginChallenge) (string, error) {
@@ -259,6 +342,14 @@ func (c *Client) requestAndWaitOTP(ctx context.Context, label string, challenge 
 	}
 	if !otpRequestAccepted(otpResponse.Message) {
 		return "", fmt.Errorf("ERP rejected the OTP request: %s", safeMessage(otpResponse.Message))
+	}
+	if challenge.NewAnswer {
+		challenge.Credentials.Answers[challenge.Question] = challenge.Answer
+		if err := SaveCredentials(filepath.Join(c.SecretsDir, "erpcreds.json"), *challenge.Credentials); err != nil {
+			return "", fmt.Errorf("save ERP security answer: %w", err)
+		}
+		challenge.NewAnswer = false
+		progress.Logf("%s: saved the new security answer locally", label)
 	}
 	progress.Logf("%s: OTP request accepted by ERP", label)
 	if c.Phase != nil {
@@ -392,6 +483,21 @@ func (c *Client) validateLoginResponse(ctx context.Context, response *http.Respo
 		progress.Logf("ERP auth: login redirect already established the session")
 		return c.validateTrainingPlacementAccess(ctx)
 	}
+	if token == "" {
+		response, err := c.Get(ctx, "/IIT_ERP3/")
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		currentBody, err := readLimited(response.Body, 2<<20)
+		if err != nil {
+			return err
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 || isAuthURL(response.Request.URL) || !validSessionBody(currentBody) {
+			return fmt.Errorf("%w: ERP did not establish an authenticated application session", ErrSessionRejected)
+		}
+		return c.validateTrainingPlacementAccess(ctx)
+	}
 	return c.validateSession(ctx, token)
 }
 
@@ -475,19 +581,49 @@ func (c *Client) readSession() (string, error) {
 func (c *Client) installCookie(token string) {
 	root, _ := url.Parse(c.BaseURL + "/")
 	c.HTTP.Jar.SetCookies(root, []*http.Cookie{{Name: "ssoToken", Value: token, Path: "/", Secure: strings.HasPrefix(c.BaseURL, "https://")}})
+	c.sessionToken = token
 }
 
 func (c *Client) tokenFromResponse(response *http.Response, body []byte) string {
-	if response != nil && response.Request != nil && response.Request.URL != nil {
-		if token := response.Request.URL.Query().Get("ssoToken"); token != "" {
-			return token
+	for current, redirects := response, 0; current != nil && redirects < 12; redirects++ {
+		if current.Request != nil && current.Request.URL != nil {
+			if token := current.Request.URL.Query().Get("ssoToken"); token != "" {
+				return token
+			}
 		}
+		for _, cookie := range current.Cookies() {
+			if cookie.Name == "ssoToken" && cookie.Value != "" {
+				return cookie.Value
+			}
+		}
+		if location := current.Header.Get("Location"); location != "" {
+			if parsed, err := url.Parse(location); err == nil {
+				if token := parsed.Query().Get("ssoToken"); token != "" {
+					return token
+				}
+			}
+			if match := tokenRE.FindString(location); match != "" {
+				return strings.TrimPrefix(match, "ssoToken=")
+			}
+		}
+		if current.Request == nil {
+			break
+		}
+		current = current.Request.Response
 	}
 	if match := tokenRE.Find(body); len(match) > 0 {
 		return strings.TrimPrefix(string(match), "ssoToken=")
 	}
-	if response != nil && response.Request != nil && response.Request.URL != nil {
-		for _, cookie := range c.HTTP.Jar.Cookies(response.Request.URL) {
+	return c.tokenFromJar()
+}
+
+func (c *Client) tokenFromJar() string {
+	for _, path := range []string{"/", "/IIT_ERP3/", "/SSOAdministration/"} {
+		location, err := url.Parse(c.BaseURL + path)
+		if err != nil {
+			continue
+		}
+		for _, cookie := range c.HTTP.Jar.Cookies(location) {
 			if cookie.Name == "ssoToken" && cookie.Value != "" {
 				return cookie.Value
 			}

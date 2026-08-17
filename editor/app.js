@@ -30,6 +30,9 @@
   let setupStatusRequest = null;
   let setupJobID = 0;
   let handledSetupJobID = 0;
+  let canReuseSavedLogin = false;
+  let savedCredentialImportAttempted = false;
+  let savedLoginIsOnboarding = false;
   const savedSelections = new WeakMap();
   const blockEditorSync = new WeakMap();
   const inlineEditorSync = new WeakMap();
@@ -376,7 +379,7 @@
       </div>
     </article>`).join("");
 
-    workspace.innerHTML = `${viewHeader("Resume entries", "Maintain up to 50 portal entries. ERP export uses 9 px text, inline bold/italic markup, and optional per-line spacing.", actions)}
+    workspace.innerHTML = `${viewHeader("Resume entries", "Maintain up to 50 portal entries. ERP export uses 10 px text, inline bold/italic markup, and optional per-line spacing.", actions)}
       <div class="stack">${cards || '<div class="empty-state"><h3>No entries yet</h3><p>Add internships, projects, achievements, and responsibilities as separate cards.</p></div>'}</div>`;
     bindEntryEvents();
   }
@@ -657,16 +660,16 @@
         <div class="field quarter"><label>Degree / exam</label><input class="input academic-input" data-field="qualification" value="${escapeHtml(academic.qualification)}"${current ? " disabled" : ""}></div>
         <div class="field quarter"><label>Institution</label><input class="input academic-input" data-field="institution" value="${escapeHtml(academic.institution)}"${current ? " disabled" : ""}></div>
         <div class="field quarter"><label>Completion year</label><input class="input academic-input" data-field="completionYear" value="${escapeHtml(academic.completionYear)}"></div>
-        <div class="field quarter"><label>Score type</label><select class="select academic-score-kind"><option value="percentage"${academic.score.kind === "percentage" ? " selected" : ""}>Percentage</option><option value="cgpa"${academic.score.kind === "cgpa" ? " selected" : ""}>CGPA</option></select></div>
-        <div class="field quarter"><label>${academic.score.kind === "percentage" ? "Percentage" : "CGPA"}</label><input class="input academic-score-value" value="${escapeHtml(academic.score.value)}"></div>
-        <div class="field quarter"><label>Maximum CGPA</label><input class="input academic-score-outof" value="${escapeHtml(academic.score.outOf)}"${academic.score.kind === "percentage" ? " disabled" : ""}></div>
+        <div class="field quarter"><label>Score type</label><select class="select academic-score-kind"${current ? " disabled" : ""}><option value="percentage"${academic.score.kind === "percentage" ? " selected" : ""}>Percentage</option><option value="cgpa"${academic.score.kind === "cgpa" ? " selected" : ""}>CGPA</option></select></div>
+        <div class="field quarter"><label>${academic.score.kind === "percentage" ? "Percentage" : "CGPA"}</label><input class="input academic-score-value" value="${escapeHtml(academic.score.value)}"${current ? ' readonly aria-readonly="true" title="Fetched from the ERP student profile"' : ""}></div>
+        <div class="field quarter"><label>Maximum CGPA</label><input class="input academic-score-outof" value="${escapeHtml(academic.score.outOf)}"${academic.score.kind === "percentage" ? " disabled" : current ? ' readonly aria-readonly="true" title="Fetched from the ERP student profile"' : ""}></div>
         ${current ? `<div class="field half"><label>Specialization (preview only)</label><input class="input academic-input" data-field="specialization" value="${escapeHtml(academic.specialization)}" disabled></div>` : ""}
       </div></div>
     </article>`;
   }
 
   function renderAcademics() {
-    workspace.innerHTML = `${viewHeader("Academics", "Manage previous qualifications and the editable score/year fields for your current degree.", '<button id="add-academic" class="button primary">Add qualification</button>')}
+    workspace.innerHTML = `${viewHeader("Academics", "Manage previous qualifications and the completion year for your current degree. Current CGPA is fetched from your ERP profile.", '<button id="add-academic" class="button primary">Add qualification</button>')}
       <div class="stack">${academicCard(state.academics.current, true, 0)}${state.academics.previous.sort((a, b) => a.slot - b.slot).map((academic, index) => academicCard(academic, false, index)).join("")}</div>`;
     bindAcademicEvents();
   }
@@ -688,18 +691,20 @@
         academic[input.dataset.field] = input.value;
         markDirty(false);
       }));
-      card.querySelector(".academic-score-kind").addEventListener("change", (event) => {
-        academic.score.kind = event.target.value;
-        academic.score.outOf = event.target.value === "percentage" ? "" : academic.score.outOf;
-        markDirty(false);
-        renderAcademics();
-      });
-      card.querySelector(".academic-score-value").addEventListener("input", (event) => {
-        academic.score.value = event.target.value;
-        markDirty(false);
-      });
-      const outOf = card.querySelector(".academic-score-outof:not([disabled])");
-      if (outOf) outOf.addEventListener("input", () => { academic.score.outOf = outOf.value; markDirty(false); });
+      if (!current) {
+        card.querySelector(".academic-score-kind").addEventListener("change", (event) => {
+          academic.score.kind = event.target.value;
+          academic.score.outOf = event.target.value === "percentage" ? "" : academic.score.outOf;
+          markDirty(false);
+          renderAcademics();
+        });
+        card.querySelector(".academic-score-value").addEventListener("input", (event) => {
+          academic.score.value = event.target.value;
+          markDirty(false);
+        });
+        const outOf = card.querySelector(".academic-score-outof:not([disabled])");
+        if (outOf) outOf.addEventListener("input", () => { academic.score.outOf = outOf.value; markDirty(false); });
+      }
     });
     workspace.querySelectorAll("[data-delete-academic]").forEach((button) => button.addEventListener("click", () => {
       state.academics.previous.splice(Number(button.dataset.deleteAcademic), 1);
@@ -914,7 +919,7 @@
 
   async function forgetLogin() {
     if (!window.confirm("Forget the ERP credentials and session? Your local resume will remain.")) return;
-    try { await apiFetch("/api/setup/credentials", { method: "DELETE" }); showSetup(true); showToast("ERP login forgotten. Resume content is preserved."); }
+    try { await apiFetch("/api/setup/credentials", { method: "DELETE" }); canReuseSavedLogin = false; savedLoginIsOnboarding = false; showSavedLogin(false); showSetup(true); showToast("ERP login forgotten. Resume content is preserved."); }
     catch (error) { showDialog("Could not forget ERP login", `<p>${escapeHtml(error.message || error)}</p>`); }
   }
 
@@ -1040,6 +1045,34 @@
     document.querySelector(".app-shell").classList.toggle("setup-blocked", show);
   }
 
+  function showSavedLogin(show, onboarding) {
+    if (show) document.getElementById("security-answer-panel").hidden = true;
+    document.getElementById("saved-login-panel").hidden = !show;
+    document.getElementById("setup-form").hidden = show;
+    const importing = Boolean(show && onboarding);
+    document.getElementById("setup-kicker").textContent = show ? (importing ? "Saved login found" : "Session expired") : "Local setup";
+    document.getElementById("setup-title").textContent = show ? (importing ? "Import your ERP resume" : "Sign in to ERP again") : "Connect your IIT KGP ERP account";
+    document.getElementById("setup-privacy").textContent = show
+      ? (importing
+        ? "CV++ is securely reusing the ERP login saved on this computer. You only need to provide a missing security answer or the newest email OTP."
+        : "CV++ has reused your saved login and matching security answer. Only the newest email OTP is needed.")
+      : "Your login and resume stay on this computer. CV++ connects directly to IIT KGP ERP.";
+  }
+
+  function showSecurityAnswerPrompt(show, question) {
+    const panel = document.getElementById("security-answer-panel");
+    panel.hidden = !show;
+    if (!show) return;
+    document.getElementById("saved-login-panel").hidden = true;
+    document.getElementById("setup-form").hidden = true;
+    document.getElementById("setup-kicker").textContent = "Session expired";
+    document.getElementById("setup-title").textContent = "One security answer is missing";
+    document.getElementById("setup-privacy").textContent = "Your saved roll number and password are already being reused. ERP requires this answer before it can send an OTP.";
+    document.getElementById("security-answer-question").textContent = question || "Fetching question…";
+    showOTPPrompt(false);
+    window.requestAnimationFrame(() => document.getElementById("security-answer-input").focus());
+  }
+
   function setSetupError(message) {
     const target = document.getElementById("setup-error");
     target.textContent = message || "";
@@ -1084,6 +1117,7 @@
     setSetupWaiting(true);
     try {
       await apiFetch("/api/setup/credentials", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roll_number: roll, password, answers: { [question]: answer } }) });
+      canReuseSavedLogin = true;
       const response = await apiFetch("/api/setup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ freshLogin: true }) });
       const payload = await response.json();
       setupJobID = Number(payload.jobID) || 0;
@@ -1091,6 +1125,26 @@
     } catch (error) {
       setSetupWaiting(false);
       setSetupError(error.message || "Could not start ERP import.");
+    }
+  }
+
+  async function importWithSavedCredentials() {
+    if (savedCredentialImportAttempted) return;
+    savedCredentialImportAttempted = true;
+    savedLoginIsOnboarding = true;
+    showSavedLogin(true, true);
+    showSetup(true);
+    setSetupWaiting(true);
+    try {
+      const response = await apiFetch("/api/setup/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ freshLogin: false }) });
+      const payload = await response.json();
+      setupJobID = Number(payload.jobID) || 0;
+      showToast("Using your saved ERP login to import your resume…");
+    } catch (error) {
+      savedLoginIsOnboarding = false;
+      showSavedLogin(false);
+      setSetupWaiting(false);
+      setSetupError(error.message || "Could not start ERP import with the saved login.");
     }
   }
 
@@ -1112,6 +1166,29 @@
     }
   }
 
+  async function submitSecurityAnswer(event) {
+    event.preventDefault();
+    const errorTarget = document.getElementById("security-answer-error");
+    errorTarget.textContent = "";
+    errorTarget.hidden = true;
+    const input = document.getElementById("security-answer-input");
+    const button = document.querySelector("#security-answer-form button[type=\"submit\"]");
+    input.disabled = true;
+    button.disabled = true;
+    try {
+      await apiFetch("/api/erp/security-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer: input.value }) });
+      input.value = "";
+      showToast("Security answer accepted. Requesting an ERP OTP…");
+      await refreshSetupStatus();
+    } catch (error) {
+      errorTarget.textContent = error.message || "Could not submit the security answer.";
+      errorTarget.hidden = false;
+    } finally {
+      input.disabled = false;
+      button.disabled = false;
+    }
+  }
+
   function setSetupWaiting(waiting) {
     const form = document.getElementById("setup-form");
     form.classList.toggle("is-waiting", waiting);
@@ -1130,9 +1207,12 @@
     if (jobID) handledSetupJobID = jobID;
     setupJobID = 0;
     setSetupWaiting(false);
+    showSecurityAnswerPrompt(false);
     showOTPPrompt(false);
     if (!job.ok) {
+      savedLoginIsOnboarding = false;
       const message = job.error || "ERP import failed. Your local resume was not changed.";
+      showSavedLogin(false);
       showSetup(true);
       setSetupError(message);
       if (message.toLowerCase().includes("security question")) {
@@ -1142,6 +1222,8 @@
       return;
     }
     setSetupError("");
+    savedLoginIsOnboarding = false;
+    showSavedLogin(false);
     showSetup(false);
     document.getElementById("setup-password").value = "";
     document.getElementById("setup-answer").value = "";
@@ -1158,6 +1240,11 @@
       try {
         const response = await apiFetch("/api/app/status");
         const status = await response.json();
+        canReuseSavedLogin = Boolean(status.credentials);
+        if (status.onboarding && canReuseSavedLogin && !savedCredentialImportAttempted && !status.jobRunning && !(status.job && status.job.id)) {
+          await importWithSavedCredentials();
+          return;
+        }
         document.getElementById("app-version").textContent = status.version && status.version !== "dev" ? ` · ${status.version}` : "";
         const job = status.job || {};
         const jobID = Number(job.id) || 0;
@@ -1170,9 +1257,12 @@
           return;
         }
         const waitingForStart = document.getElementById("setup-form").classList.contains("is-waiting") && !setupJobID;
-        const shouldShow = Boolean(status.onboarding || status.otpRequired || waitingForStart || (isSetupJob && job.running));
+        const shouldShow = Boolean(status.onboarding || status.securityAnswerRequired || status.otpRequired || waitingForStart || (isSetupJob && job.running));
+        const reuseSavedLogin = Boolean(canReuseSavedLogin && (status.otpRequired || (savedLoginIsOnboarding && isSetupJob && job.running)));
+        showSecurityAnswerPrompt(Boolean(status.securityAnswerRequired), status.securityQuestion);
+        if (!status.securityAnswerRequired) showSavedLogin(reuseSavedLogin, savedLoginIsOnboarding);
         showSetup(shouldShow);
-        showOTPPrompt(Boolean(status.otpRequired));
+        showOTPPrompt(Boolean(!status.securityAnswerRequired && status.otpRequired));
         if (isSetupJob && job.running) setSetupWaiting(true);
       } catch (_) {
         // The event stream and the next poll can recover from a transient request failure.
@@ -1209,13 +1299,17 @@
       if (payload.ok) {
         if (payload.message) appendERPLog(payload.message);
         showToast(payload.message || "ERP PDF saved.");
+        showSavedLogin(false);
+        showSecurityAnswerPrompt(false);
         showSetup(false);
         showOTPPrompt(false);
         loadServerResume();
         refreshPDF(true);
       } else {
+        showSecurityAnswerPrompt(false);
         if (payload.error) appendERPLog(`error: ${payload.error}`);
         if (payload.error && payload.error.toLowerCase().includes("security question")) {
+          showSavedLogin(false);
           showSetup(true);
           document.getElementById("setup-question").readOnly = false;
           document.getElementById("setup-manual-question").checked = true;
@@ -1225,7 +1319,15 @@
     });
     erpEventSource.addEventListener("phase", (event) => {
       const payload = JSON.parse(event.data || "{}");
-      if (payload.phase === "otp-required") showOTPPrompt(true);
+      if (payload.phase === "security-answer-required") {
+        showSetup(true);
+        refreshSetupStatus();
+      } else if (payload.phase === "otp-required") {
+        showSecurityAnswerPrompt(false);
+        showSavedLogin(canReuseSavedLogin, savedLoginIsOnboarding);
+        showSetup(true);
+        showOTPPrompt(true);
+      }
       appendERPLog(payload.phase || "");
     });
     erpEventSource.addEventListener("error", () => {
@@ -1330,6 +1432,7 @@
   document.getElementById("fetch-question").addEventListener("click", fetchSetupQuestion);
   document.getElementById("setup-manual-question").addEventListener("change", (event) => { document.getElementById("setup-question").readOnly = !event.target.checked; });
   document.getElementById("setup-form").addEventListener("submit", submitSetup);
+  document.getElementById("security-answer-form").addEventListener("submit", submitSecurityAnswer);
   document.getElementById("otp-form").addEventListener("submit", submitOTP);
   document.getElementById("restore-backup").addEventListener("click", () => { showSetup(false); openJson(); });
 
