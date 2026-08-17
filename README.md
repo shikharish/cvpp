@@ -1,7 +1,5 @@
 # CV++
 
-> Increment your resume.
-
 A local editor and CLI for maintaining IIT Kharagpur ERP CV data in JSON, syncing it to the CDC resume portal, and downloading the portal-generated PDF.
 
 Your ERP credentials, session, resume JSON, and generated PDFs stay on your machine and are ignored by git.
