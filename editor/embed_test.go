@@ -116,3 +116,30 @@ func TestPDFPreviewUsesResizableSplitAndBlobRefresh(t *testing.T) {
 		t.Fatal("embedded PDF preview must keep the browser PDF toolbar")
 	}
 }
+
+func TestDefaultAndInlineFontSizesReachPortalOutput(t *testing.T) {
+	index, err := Files.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	core, err := Files.ReadFile("core.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), `id="default-font-size"`) {
+		t.Fatal("editor must expose the persisted default PDF font size")
+	}
+	if !strings.Contains(string(core), "defaultFontSize: normalizeFontSize(source.defaultFontSize)") || !strings.Contains(string(core), "entrySubjectHtml(entry, data.defaultFontSize)") {
+		t.Fatal("default font size must be normalized and used for portal entry output")
+	}
+	if strings.Contains(string(core), `querySelectorAll("span, a")`) {
+		t.Fatal("portal formatting must not discard custom-size spans")
+	}
+	if !strings.Contains(string(app), "state.defaultFontSize = Number(event.target.value)") {
+		t.Fatal("default font size control must update resume state")
+	}
+}

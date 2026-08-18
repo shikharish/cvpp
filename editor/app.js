@@ -116,6 +116,9 @@
       : (serverMode ? "Loading data/resume.json from the local server." : "Open data/resume.json to begin.");
     const indicator = document.getElementById("dirty-indicator");
     indicator.className = `status-dot ${dirty ? "dirty" : hasDocument ? "saved" : ""}`;
+    const defaultFontSize = document.getElementById("default-font-size");
+    defaultFontSize.disabled = !hasDocument;
+    defaultFontSize.value = String(state.defaultFontSize || 10);
 
     const result = Core.validateResume(state);
     const summary = document.getElementById("validation-summary");
@@ -379,7 +382,7 @@
       </div>
     </article>`).join("");
 
-    workspace.innerHTML = `${viewHeader("Resume entries", "Maintain up to 50 portal entries. ERP export uses 10 px text, inline bold/italic markup, and optional per-line spacing.", actions)}
+    workspace.innerHTML = `${viewHeader("Resume entries", "Maintain up to 50 portal entries. ERP export uses your default text size, inline formatting, and optional per-line spacing.", actions)}
       <div class="stack">${cards || '<div class="empty-state"><h3>No entries yet</h3><p>Add internships, projects, achievements, and responsibilities as separate cards.</p></div>'}</div>`;
     bindEntryEvents();
   }
@@ -395,7 +398,7 @@
   }
 
   function richToolbar(allowLists) {
-    const sizes = Array.from({ length: 17 }, (_, index) => index + 8);
+    const sizes = Array.from({ length: Core.MAX_FONT_SIZE - Core.MIN_FONT_SIZE + 1 }, (_, index) => index + Core.MIN_FONT_SIZE);
     const lineSpacing = allowLists ? `
       <select class="line-gap-select" data-gap-position="before" title="Gap before current line" aria-label="Gap before current line">
         <option value="">Before</option>${gapOptions(0)}
@@ -408,7 +411,7 @@
       <button type="button" data-command="italic" title="Italic" aria-label="Italic"><em>I</em></button>
       ${allowLists ? '<button type="button" data-command="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list">• List</button>' : ""}
       <select class="font-size-select" data-command="fontSize" title="Font size" aria-label="Font size">
-        <option value="">Size</option><option value="default">Default</option>${sizes.map((size) => `<option value="${size}">${size}</option>`).join("")}
+        <option value="">Size</option><option value="default">Default (${state.defaultFontSize}px)</option>${sizes.map((size) => `<option value="${size}">${size}</option>`).join("")}
       </select>
       ${lineSpacing}
     </div>`;
@@ -435,7 +438,7 @@
 
   function applyFontSize(editor, value) {
     const size = Number(value);
-    if (value !== "default" && (!Number.isInteger(size) || size < 8 || size > 24)) return;
+    if (value !== "default" && (!Number.isInteger(size) || size < Core.MIN_FONT_SIZE || size > Core.MAX_FONT_SIZE)) return;
     restoreSelection(editor);
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount) return;
@@ -714,7 +717,7 @@
   }
 
   function richSection(title, editorId, html, description) {
-    const preview = Core.formatPortalBlockHtml(html);
+    const preview = Core.formatPortalBlockHtml(html, state.defaultFontSize);
     return `<div class="field"><label>${escapeHtml(title)}</label>${description ? `<span class="muted">${escapeHtml(description)}</span>` : ""}
       <div class="editor-panel">
         <div class="rich-wrap">${richToolbar(true)}<div id="${editorId}" class="html-editor" contenteditable="true">${Core.sanitizeBlockHtml(html, false)}</div></div>
@@ -751,7 +754,7 @@
       const next = clean ? Core.sanitizeBlockHtml(editor.innerHTML, false) : editor.innerHTML;
       if (clean && editor.innerHTML !== next) editor.innerHTML = next;
       applyEditorGapStyles(editor);
-      preview.innerHTML = Core.formatPortalBlockHtml(next) || '<span class="muted">Preview will appear here.</span>';
+      preview.innerHTML = Core.formatPortalBlockHtml(next, state.defaultFontSize) || '<span class="muted">Preview will appear here.</span>';
       onChange(next);
       editor.dataset.syncedHtml = next;
       return next !== previous;
@@ -864,7 +867,7 @@
   }
 
   function previewEntry(entry) {
-    return `<div class="preview-entry">${Core.sanitizeBlockHtml(Core.entrySubjectHtml(entry), false)}</div>`;
+    return `<div class="preview-entry">${Core.sanitizeBlockHtml(Core.entrySubjectHtml(entry, state.defaultFontSize), false)}</div>`;
   }
 
   function sectionEntries(section, variantId) {
@@ -879,9 +882,9 @@
 
     variant.sectionOrder.forEach((section) => {
       const label = (Core.SECTION_OPTIONS.find((item) => item.value === section) || { label: section }).label;
-      if (section === "skill" && variant.skillsHtml) previewSections.push(`<h2>${escapeHtml(label)}</h2>${Core.formatPortalBlockHtml(variant.skillsHtml)}`);
-      else if (section === "coursework" && state.shared.courseworkHtml) previewSections.push(`<h2>${escapeHtml(label)}</h2>${Core.formatPortalBlockHtml(state.shared.courseworkHtml)}`);
-      else if (section === "eaa" && variant.extracurricularHtml) previewSections.push(`<h2>${escapeHtml(label)}</h2>${Core.formatPortalBlockHtml(variant.extracurricularHtml)}`);
+      if (section === "skill" && variant.skillsHtml) previewSections.push(`<h2>${escapeHtml(label)}</h2>${Core.formatPortalBlockHtml(variant.skillsHtml, state.defaultFontSize)}`);
+      else if (section === "coursework" && state.shared.courseworkHtml) previewSections.push(`<h2>${escapeHtml(label)}</h2>${Core.formatPortalBlockHtml(state.shared.courseworkHtml, state.defaultFontSize)}`);
+      else if (section === "eaa" && variant.extracurricularHtml) previewSections.push(`<h2>${escapeHtml(label)}</h2>${Core.formatPortalBlockHtml(variant.extracurricularHtml, state.defaultFontSize)}`);
       else if (!["skill", "coursework", "eaa"].includes(section)) {
         const entries = sectionEntries(section, variant.id);
         if (entries.length) previewSections.push(`<h2>${escapeHtml(label)}</h2>${entries.map(previewEntry).join("")}`);
@@ -1423,6 +1426,14 @@
     render();
     workspace.focus();
   }));
+  document.getElementById("default-font-size").addEventListener("change", (event) => {
+    if (!hasDocument) return;
+    flushVisibleEditors(true);
+    state.defaultFontSize = Number(event.target.value);
+    markDirty(false);
+    render();
+    showToast(`Default PDF font size set to ${state.defaultFontSize}px.`);
+  });
   document.getElementById("open-json").addEventListener("click", openJson);
   document.getElementById("save-json").addEventListener("click", () => { saveJson(); });
   document.getElementById("download-json").addEventListener("click", () => downloadJson(fileName));

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	xhtml "golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -16,6 +17,8 @@ import (
 
 const (
 	PortalFontSize = 10
+	MinFontSize    = 8
+	MaxFontSize    = 24
 	MaxGapPixels   = 24
 )
 
@@ -24,16 +27,18 @@ var (
 	sections           = setOf("Internship", "Project", "Internship/Project", "Academic Achievement", "Certification", "Training", "Experience", "Entrepreneurial", "Competition/Conference", "Publication", "Position of Responsibilities", "eaa", "skill", "coursework")
 	spaceRE            = regexp.MustCompile(`\s+`)
 	arrowRE            = regexp.MustCompile(`\s*[→➜➝⟶]\s*`)
+	fontSizeRE         = regexp.MustCompile(`(?i)(?:^|;)\s*font-size\s*:\s*(\d{1,2})px\s*(?:;|$)`)
 	compatibleReplacer = strings.NewReplacer("\u2010", "-", "\u2011", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-", "\u2212", "-", "\u2192", " to ", "\u279c", " to ", "\u279d", " to ", "\u27f6", " to ", "\u00d7", "x", "\u2022", "-", "\u25e6", "-", "\u25aa", "-")
 )
 
 type Resume struct {
-	SchemaVersion int       `json:"schemaVersion"`
-	Metadata      Metadata  `json:"metadata,omitempty"`
-	Academics     Academics `json:"academics"`
-	Shared        Shared    `json:"shared"`
-	Variants      []Variant `json:"variants"`
-	Entries       []Entry   `json:"entries"`
+	SchemaVersion   int       `json:"schemaVersion"`
+	DefaultFontSize int       `json:"defaultFontSize,omitempty"`
+	Metadata        Metadata  `json:"metadata,omitempty"`
+	Academics       Academics `json:"academics"`
+	Shared          Shared    `json:"shared"`
+	Variants        []Variant `json:"variants"`
+	Entries         []Entry   `json:"entries"`
 }
 
 type Metadata struct {
@@ -114,6 +119,9 @@ func (r *Resume) Validate() error {
 	if r.SchemaVersion != 1 {
 		errors = append(errors, "only schemaVersion 1 is supported")
 	}
+	if r.DefaultFontSize != 0 && !validFontSize(r.DefaultFontSize) {
+		errors = append(errors, fmt.Sprintf("default font size must be between %d and %d px", MinFontSize, MaxFontSize))
+	}
 	if len(r.Entries) > 50 {
 		errors = append(errors, fmt.Sprintf("ERP supports 50 entries; found %d", len(r.Entries)))
 	}
@@ -175,8 +183,24 @@ func (r *Resume) Validate() error {
 	return nil
 }
 
+func (r *Resume) effectiveFontSize() int {
+	return normalizedFontSize(r.DefaultFontSize)
+}
+
+func validFontSize(value int) bool {
+	return value >= MinFontSize && value <= MaxFontSize
+}
+
+func normalizedFontSize(value int) int {
+	if validFontSize(value) {
+		return value
+	}
+	return PortalFontSize
+}
+
 func (r *Resume) PortalFields() map[string]string {
 	fields := map[string]string{}
+	fontSize := r.effectiveFontSize()
 	for slot := 1; slot <= 5; slot++ {
 		var academic *Academic
 		for index := range r.Academics.Previous {
@@ -227,7 +251,7 @@ func (r *Resume) PortalFields() map[string]string {
 			entry := r.Entries[index]
 			fields[fmt.Sprintf("standard%d", slot)] = entry.Type
 			fields[fmt.Sprintf("university%d", slot)] = ""
-			fields[fmt.Sprintf("subject%d", slot)] = EntrySubjectHTML(entry)
+			fields[fmt.Sprintf("subject%d", slot)] = entrySubjectHTML(entry, fontSize)
 			for variant := 1; variant <= 3; variant++ {
 				fields[fmt.Sprintf("%dresume%d", slot, variant)] = yesNo(!entry.Hidden && contains(entry.IncludeIn, fmt.Sprintf("cv%d", variant)))
 			}
@@ -241,13 +265,13 @@ func (r *Resume) PortalFields() map[string]string {
 		}
 	}
 
-	fields["research_area"] = BlockHTML(r.Shared.CourseworkHTML)
+	fields["research_area"] = blockHTML(r.Shared.CourseworkHTML, fontSize)
 	for index, variant := range r.Variants {
 		number := index + 1
 		fields[fmt.Sprintf("showminor%d", number)] = yesNo(variant.ShowMinor)
 		fields[fmt.Sprintf("showmicro%d", number)] = yesNo(variant.ShowMicro)
-		fields[[]string{"skill", "skill2", "skill3"}[index]] = BlockHTML(variant.SkillsHTML)
-		fields[[]string{"eaa", "objective", "gymkhana"}[index]] = BlockHTML(variant.ExtracurricularHTML)
+		fields[[]string{"skill", "skill2", "skill3"}[index]] = blockHTML(variant.SkillsHTML, fontSize)
+		fields[[]string{"eaa", "objective", "gymkhana"}[index]] = blockHTML(variant.ExtracurricularHTML, fontSize)
 		for position := 1; position <= 14; position++ {
 			selected := ""
 			if position <= len(variant.SectionOrder) {
@@ -260,7 +284,11 @@ func (r *Resume) PortalFields() map[string]string {
 }
 
 func EntrySubjectHTML(entry Entry) string {
-	return BlocksHTML(entrySubjectBlocks(entry))
+	return entrySubjectHTML(entry, PortalFontSize)
+}
+
+func entrySubjectHTML(entry Entry, fontSize int) string {
+	return blocksHTML(entrySubjectBlocks(entry), fontSize)
 }
 
 func entrySubjectBlocks(entry Entry) []Block {
@@ -278,6 +306,11 @@ func entrySubjectBlocks(entry Entry) []Block {
 }
 
 func BlocksHTML(blocks []Block) string {
+	return blocksHTML(blocks, PortalFontSize)
+}
+
+func blocksHTML(blocks []Block, fontSize int) string {
+	fontSize = normalizedFontSize(fontSize)
 	var output strings.Builder
 	inList := false
 	closeList := func() {
@@ -296,13 +329,13 @@ func BlocksHTML(blocks []Block) string {
 		}
 		if block.Kind == "paragraph" {
 			closeList()
-			writeParagraph(&output, renderInline(block.HTML))
+			writeParagraph(&output, renderInline(block.HTML), fontSize)
 		} else {
 			if !inList {
 				output.WriteString(`<ul>`)
 				inList = true
 			}
-			writeListItem(&output, renderInline(block.HTML))
+			writeListItem(&output, renderInline(block.HTML), fontSize)
 		}
 		if block.GapAfter > 0 {
 			closeList()
@@ -314,6 +347,11 @@ func BlocksHTML(blocks []Block) string {
 }
 
 func BlockHTML(source string) string {
+	return blockHTML(source, PortalFontSize)
+}
+
+func blockHTML(source string, fontSize int) string {
+	fontSize = normalizedFontSize(fontSize)
 	nodes, err := parseFragment(source)
 	if err != nil {
 		return ""
@@ -336,10 +374,10 @@ func BlockHTML(source string) string {
 				output.WriteString(`<ul>`)
 				inList = true
 			}
-			writeListItem(&output, trimLeadingPortalSpaces(content))
+			writeListItem(&output, trimLeadingPortalSpaces(content), fontSize)
 		} else {
 			closeList()
-			writeParagraph(&output, content)
+			writeParagraph(&output, content, fontSize)
 		}
 		if gapAfter > 0 {
 			closeList()
@@ -353,6 +391,7 @@ func BlockHTML(source string) string {
 		if node.Type == xhtml.ElementNode && node.Data == "ul" {
 			for child := node.FirstChild; child != nil; child = child.NextSibling {
 				if child.Type == xhtml.ElementNode && child.Data == "li" {
+					removeLeadingPortalSpace(child)
 					writeBlock("bullet", renderChildren(child), elementGap(child, "data-gap-before"), elementGap(child, "data-gap-after"))
 				}
 			}
@@ -365,14 +404,14 @@ func BlockHTML(source string) string {
 	return output.String()
 }
 
-func writeParagraph(output *strings.Builder, content string) {
+func writeParagraph(output *strings.Builder, content string, fontSize int) {
 	content = protectAmpersandSpaces(content)
-	fmt.Fprintf(output, `<p><span style="font-size: %dpx;">%s</span></p>`, PortalFontSize, content)
+	fmt.Fprintf(output, `<p><span style="font-size: %dpx;">%s</span></p>`, fontSize, content)
 }
 
-func writeListItem(output *strings.Builder, content string) {
+func writeListItem(output *strings.Builder, content string, fontSize int) {
 	content = protectAmpersandSpaces(content)
-	fmt.Fprintf(output, `<li><span style="font-size: %dpx;">&nbsp;%s</span></li>`, PortalFontSize, content)
+	fmt.Fprintf(output, `<li><span style="font-size: %dpx;">&nbsp;%s</span></li>`, fontSize, content)
 }
 
 func writeSpacer(output *strings.Builder, pixels int) {
@@ -485,6 +524,22 @@ func trimLeadingPortalSpaces(input string) string {
 	}
 }
 
+func removeLeadingPortalSpace(node *xhtml.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Type == xhtml.TextNode {
+		node.Data = strings.TrimLeftFunc(node.Data, unicode.IsSpace)
+		return node.Data != ""
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if removeLeadingPortalSpace(child) {
+			return true
+		}
+	}
+	return false
+}
+
 func protectAmpersandSpaces(input string) string {
 	return strings.ReplaceAll(input, "&amp; ", "&amp;&nbsp;")
 }
@@ -514,12 +569,38 @@ func renderAllowed(node *xhtml.Node) string {
 			return "<em>" + children + "</em>"
 		case "br":
 			return "<br>"
+		case "span":
+			if size := elementFontSize(node); size != 0 {
+				return fmt.Sprintf(`<span style="font-size: %dpx;">%s</span>`, size, children)
+			}
+			return children
 		default:
 			return children
 		}
 	default:
 		return ""
 	}
+}
+
+func elementFontSize(node *xhtml.Node) int {
+	if node == nil || node.Type != xhtml.ElementNode {
+		return 0
+	}
+	for _, attr := range node.Attr {
+		if !strings.EqualFold(attr.Key, "style") {
+			continue
+		}
+		match := fontSizeRE.FindStringSubmatch(attr.Val)
+		if len(match) != 2 {
+			return 0
+		}
+		size, err := strconv.Atoi(match[1])
+		if err == nil && validFontSize(size) {
+			return size
+		}
+		return 0
+	}
+	return 0
 }
 
 func renderChildren(node *xhtml.Node) string {

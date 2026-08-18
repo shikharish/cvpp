@@ -9,9 +9,9 @@ import (
 func TestPortalFormatting(t *testing.T) {
 	html := BlocksHTML([]Block{
 		{Kind: "bullet", HTML: `Temporarily omitted.`, Hidden: true},
-		{Kind: "bullet", HTML: `Added <a href="https://example.com"><strong>fast math</strong></a> with <em>care</em>: 12.7 → 7.2 ns at 9.4× throughput.`},
+		{Kind: "bullet", HTML: `Added <a href="https://example.com"><strong>fast math</strong></a> with <em>care</em>: <span style="font-size: 12px;">12.7 → 7.2 ns</span> at 9.4× throughput.`},
 	})
-	want := `<ul><li><span style="font-size: 10px;">&nbsp;Added <strong>fast math</strong> with <em>care</em>: 12.7 to 7.2 ns at 9.4x throughput.</span></li></ul>`
+	want := `<ul><li><span style="font-size: 10px;">&nbsp;Added <strong>fast math</strong> with <em>care</em>: <span style="font-size: 12px;">12.7 to 7.2 ns</span> at 9.4x throughput.</span></li></ul>`
 	if html != want {
 		t.Fatalf("BlocksHTML()\n got %s\nwant %s", html, want)
 	}
@@ -20,6 +20,34 @@ func TestPortalFormatting(t *testing.T) {
 	}
 	if strings.Contains(html, "Temporarily omitted") {
 		t.Fatal("portal formatting included a hidden detail block")
+	}
+}
+
+func TestResumeDefaultFontSizeControlsPortalOutput(t *testing.T) {
+	resume := Resume{
+		SchemaVersion:   1,
+		DefaultFontSize: 12,
+		Entries: []Entry{{
+			ID:        "sized-entry",
+			Type:      "Experience",
+			Details:   []Block{{Kind: "bullet", HTML: `Default <span style="font-size: 8px;">small</span>`}},
+			IncludeIn: []string{"cv1"},
+		}},
+		Variants: []Variant{{ID: "cv1"}, {ID: "cv2"}, {ID: "cv3"}},
+	}
+	if err := resume.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	want := `<ul><li><span style="font-size: 12px;">&nbsp;Default <span style="font-size: 8px;">small</span></span></li></ul>`
+	if got := resume.PortalFields()["subject7"]; got != want {
+		t.Fatalf("subject7\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestResumeRejectsInvalidDefaultFontSize(t *testing.T) {
+	resume := Resume{SchemaVersion: 1, DefaultFontSize: 25, Variants: []Variant{{ID: "cv1"}, {ID: "cv2"}, {ID: "cv3"}}}
+	if err := resume.Validate(); err == nil || !strings.Contains(err.Error(), "default font size") {
+		t.Fatalf("Validate() error = %v, want default font size error", err)
 	}
 }
 
@@ -91,9 +119,9 @@ func TestBlockHTMLPreservesLists(t *testing.T) {
 	}
 }
 
-func TestBlockHTMLDoesNotAccumulatePortalBulletSpacing(t *testing.T) {
+func TestBlockHTMLPreservesCustomSizeWithoutAccumulatingBulletSpacing(t *testing.T) {
 	got := BlockHTML(`<ul><li><span style="font-size: 9px;">&nbsp;Systems programming</span></li></ul>`)
-	want := `<ul><li><span style="font-size: 10px;">&nbsp;Systems programming</span></li></ul>`
+	want := `<ul><li><span style="font-size: 10px;">&nbsp;<span style="font-size: 9px;">Systems programming</span></span></li></ul>`
 	if got != want {
 		t.Fatalf("BlockHTML()\n got %s\nwant %s", got, want)
 	}

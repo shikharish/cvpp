@@ -28,14 +28,14 @@ func ConvertPortalForm(values url.Values) (*Resume, error) {
 	}
 	resume.Academics.Current = Academic{Slot: 6, Standard: valueAt(values, "standard", 6), Qualification: valueAt(values, "qualification", 6), Institution: valueAt(values, "university", 6), CompletionYear: valueAt(values, "year", 6), Specialization: firstValue(values, "specialization6", "branch6", "stream6"), Score: scoreFrom(values, 6)}
 
-	resume.Shared.CourseworkHTML = firstValue(values, "research_area", "coursework")
+	resume.Shared.CourseworkHTML = normalizeImportedBlockHTML(firstValue(values, "research_area", "coursework"))
 	sectionFields := []string{"skill", "skill2", "skill3"}
 	extraFields := []string{"eaa", "objective", "gymkhana"}
 	for index, variant := range resume.Variants {
 		variant.ShowMinor = strings.EqualFold(firstValue(values, "showminor"+itoa(index+1)), "Y")
 		variant.ShowMicro = strings.EqualFold(firstValue(values, "showmicro"+itoa(index+1)), "Y")
-		variant.SkillsHTML = firstValue(values, sectionFields[index])
-		variant.ExtracurricularHTML = firstValue(values, extraFields[index])
+		variant.SkillsHTML = normalizeImportedBlockHTML(firstValue(values, sectionFields[index]))
+		variant.ExtracurricularHTML = normalizeImportedBlockHTML(firstValue(values, extraFields[index]))
 		for position := 1; position <= 14; position++ {
 			if section := strings.TrimSpace(firstValue(values, "cv"+itoa(index+1)+"_pref"+itoa(position))); section != "" {
 				variant.SectionOrder = append(variant.SectionOrder, section)
@@ -223,9 +223,111 @@ func serializeInline(node *xhtml.Node) string {
 		return "<em>" + out.String() + "</em>"
 	case "br":
 		return "<br>"
+	case "span":
+		size := elementFontSize(node)
+		if isPortalLineWrapper(node) || size == PortalFontSize {
+			return out.String()
+		}
+		if size != 0 {
+			return `<span style="font-size: ` + strconv.Itoa(size) + `px;">` + out.String() + `</span>`
+		}
+		return out.String()
 	default:
 		return out.String()
 	}
+}
+
+func normalizeImportedBlockHTML(source string) string {
+	nodes, err := parseFragment(source)
+	if err != nil {
+		return source
+	}
+	for _, node := range nodes {
+		walkResumeNode(node, func(current *xhtml.Node) {
+			if current.Type != xhtml.ElementNode {
+				return
+			}
+			if current.Data == "p" || current.Data == "li" {
+				for child := current.FirstChild; child != nil; child = child.NextSibling {
+					if child.Type == xhtml.ElementNode && child.Data == "span" && isPortalLineWrapper(child) {
+						unwrapNode(child)
+						return
+					}
+				}
+				return
+			}
+			if current.Data == "span" && elementFontSize(current) == PortalFontSize {
+				unwrapNode(current)
+			}
+		})
+	}
+	var output strings.Builder
+	for _, node := range nodes {
+		_ = xhtml.Render(&output, node)
+	}
+	return output.String()
+}
+
+func isPortalLineWrapper(node *xhtml.Node) bool {
+	if node == nil || node.Type != xhtml.ElementNode || node.Data != "span" || node.Parent == nil {
+		return false
+	}
+	if node.Parent.Data != "p" && node.Parent.Data != "li" {
+		return false
+	}
+	for sibling := node.Parent.FirstChild; sibling != nil; sibling = sibling.NextSibling {
+		if sibling == node || (sibling.Type == xhtml.TextNode && strings.TrimSpace(sibling.Data) == "") {
+			continue
+		}
+		return false
+	}
+	if elementFontSize(node) == PortalFontSize {
+		return true
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode && (elementFontSize(child) != 0 || containsSizedSpan(child)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSizedSpan(node *xhtml.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Type == xhtml.ElementNode && node.Data == "span" && elementFontSize(node) != 0 {
+		return true
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if containsSizedSpan(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func unwrapNode(node *xhtml.Node) {
+	if node == nil || node.Parent == nil {
+		return
+	}
+	parent := node.Parent
+	for child := node.FirstChild; child != nil; {
+		next := child.NextSibling
+		node.RemoveChild(child)
+		parent.InsertBefore(child, node)
+		child = next
+	}
+	parent.RemoveChild(node)
+}
+
+func walkResumeNode(node *xhtml.Node, visit func(*xhtml.Node)) {
+	for child := node.FirstChild; child != nil; {
+		next := child.NextSibling
+		walkResumeNode(child, visit)
+		child = next
+	}
+	visit(node)
 }
 
 func stripTags(value string) string {

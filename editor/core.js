@@ -36,6 +36,8 @@
   const VARIANT_IDS = ["cv1", "cv2", "cv3"];
   const DRAFT_KEY = "cvpp-draft-v1";
   const PORTAL_FONT_SIZE = 10;
+  const MIN_FONT_SIZE = 8;
+  const MAX_FONT_SIZE = 24;
   const MAX_GAP_PIXELS = 24;
 
   function clone(value) {
@@ -45,6 +47,7 @@
   function emptyResume() {
     return {
       schemaVersion: 1,
+      defaultFontSize: PORTAL_FONT_SIZE,
       metadata: {
         name: "",
         documentId: "resume",
@@ -96,6 +99,19 @@
     return Number.isInteger(value) && value >= 0 && value <= MAX_GAP_PIXELS;
   }
 
+  function validFontSize(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number >= MIN_FONT_SIZE && number <= MAX_FONT_SIZE;
+  }
+
+  function fontSize(value) {
+    return validFontSize(value) ? Number(value) : PORTAL_FONT_SIZE;
+  }
+
+  function normalizeFontSize(value) {
+    return value == null || value === "" ? PORTAL_FONT_SIZE : Number(value);
+  }
+
   function escapeHtml(value) {
     return text(value)
       .replace(/&/g, "&amp;")
@@ -130,6 +146,7 @@
 
     return {
       schemaVersion: Number(source.schemaVersion || 1),
+      defaultFontSize: normalizeFontSize(source.defaultFontSize),
       metadata: {
         name: text(source.metadata && source.metadata.name),
         documentId: text(source.metadata && source.metadata.documentId) || "resume",
@@ -204,6 +221,9 @@
 
     if (data.schemaVersion !== 1) {
       errors.push(`Unsupported schemaVersion ${data.schemaVersion}; expected 1.`);
+    }
+    if (!validFontSize(data.defaultFontSize)) {
+      errors.push(`Default font size must be between ${MIN_FONT_SIZE} and ${MAX_FONT_SIZE}px.`);
     }
     if (data.entries.length > 50) {
       errors.push(`The portal accepts at most 50 entries; found ${data.entries.length}.`);
@@ -314,7 +334,7 @@
       if (tag === "SPAN") {
         const match = (node.style.fontSize || "").match(/^(\d{1,2})px$/);
         const size = match ? Number(match[1]) : 0;
-        if (size >= 8 && size <= 24) element.style.fontSize = `${size}px`;
+        if (size >= MIN_FONT_SIZE && size <= MAX_FONT_SIZE) element.style.fontSize = `${size}px`;
       }
 
       if (isBlock && (tag === "P" || tag === "LI")) {
@@ -383,9 +403,9 @@
     });
   }
 
-  function wrapContents(element) {
+  function wrapContents(element, defaultFontSize) {
     const span = document.createElement("span");
-    span.style.fontSize = `${PORTAL_FONT_SIZE}px`;
+    span.style.fontSize = `${fontSize(defaultFontSize)}px`;
     while (element.firstChild) span.appendChild(element.firstChild);
     element.appendChild(span);
   }
@@ -421,13 +441,40 @@
     }
   }
 
-  function applyPortalTypography(html, block) {
+  function removePortalTypographyWrappers(root) {
+    root.querySelectorAll("p, li").forEach((line) => {
+      const content = Array.from(line.childNodes).filter((node) => (
+        node.nodeType !== Node.TEXT_NODE || node.nodeValue.trim()
+      ));
+      if (content.length !== 1 || content[0].nodeType !== Node.ELEMENT_NODE || content[0].tagName !== "SPAN") return;
+      const wrapper = content[0];
+      const wrapperSize = Number.parseInt(wrapper.style.fontSize, 10);
+      const hasNestedSize = Array.from(wrapper.querySelectorAll("span")).some((span) => validFontSize(Number.parseInt(span.style.fontSize, 10)));
+      if (wrapperSize === PORTAL_FONT_SIZE || hasNestedSize) {
+        wrapper.replaceWith(...Array.from(wrapper.childNodes));
+      }
+    });
+    root.querySelectorAll("span").forEach((span) => {
+      if (Number.parseInt(span.style.fontSize, 10) === PORTAL_FONT_SIZE) {
+        span.replaceWith(...Array.from(span.childNodes));
+      }
+    });
+  }
+
+  function normalizeImportedBlockHtml(html) {
+    const container = document.createElement("div");
+    container.innerHTML = sanitizeBlockHtml(html, false);
+    removePortalTypographyWrappers(container);
+    return container.innerHTML;
+  }
+
+  function applyPortalTypography(html, block, defaultFontSize) {
     const container = document.createElement("div");
     container.innerHTML = block
       ? sanitizeBlockHtml(html, true)
       : sanitizeInlineHtml(html, true);
 
-    container.querySelectorAll("span, a").forEach((element) => {
+    container.querySelectorAll("a").forEach((element) => {
       element.replaceWith(...Array.from(element.childNodes));
     });
     container.normalize();
@@ -436,30 +483,30 @@
     if (block) {
       container.querySelectorAll("p, li").forEach((element) => {
         if (element.tagName === "LI") removeLeadingBulletSpacing(element);
-        wrapContents(element);
+        wrapContents(element, defaultFontSize);
         if (element.tagName === "LI") addPortalBulletSpacing(element.firstChild);
       });
       Array.from(container.childNodes).forEach((node) => {
         const isBlock = node.nodeType === Node.ELEMENT_NODE && ["P", "UL"].includes(node.tagName);
         if (isBlock) return;
         const span = document.createElement("span");
-        span.style.fontSize = `${PORTAL_FONT_SIZE}px`;
+        span.style.fontSize = `${fontSize(defaultFontSize)}px`;
         node.replaceWith(span);
         span.appendChild(node);
       });
     } else {
-      wrapContents(container);
+      wrapContents(container, defaultFontSize);
     }
     return container.innerHTML;
   }
 
-  function formatPortalInlineHtml(html) {
-    return applyPortalTypography(html, false);
+  function formatPortalInlineHtml(html, defaultFontSize) {
+    return applyPortalTypography(html, false, defaultFontSize);
   }
 
-  function formatPortalBulletHtml(html) {
+  function formatPortalBulletHtml(html, defaultFontSize) {
     const container = document.createElement("div");
-    container.innerHTML = formatPortalInlineHtml(html);
+    container.innerHTML = formatPortalInlineHtml(html, defaultFontSize);
     addPortalBulletSpacing(container.firstElementChild);
     return container.innerHTML;
   }
@@ -473,22 +520,22 @@
     return element && element.getAttribute ? gapPixels(element.getAttribute(`data-gap-${position}`)) : 0;
   }
 
-  function formatPortalParagraphFromNode(node) {
+  function formatPortalParagraphFromNode(node, defaultFontSize) {
     const copy = node.cloneNode(true);
     copy.removeAttribute("data-gap-before");
     copy.removeAttribute("data-gap-after");
-    return `<p>${formatPortalInlineHtml(copy.innerHTML)}</p>`;
+    return `<p>${formatPortalInlineHtml(copy.innerHTML, defaultFontSize)}</p>`;
   }
 
-  function formatPortalBulletFromNode(node) {
+  function formatPortalBulletFromNode(node, defaultFontSize) {
     const copy = node.cloneNode(true);
     copy.removeAttribute("data-gap-before");
     copy.removeAttribute("data-gap-after");
     removeLeadingBulletSpacing(copy);
-    return `<li>${formatPortalBulletHtml(copy.innerHTML)}</li>`;
+    return `<li>${formatPortalBulletHtml(copy.innerHTML, defaultFontSize)}</li>`;
   }
 
-  function formatPortalBlockHtml(html) {
+  function formatPortalBlockHtml(html, defaultFontSize) {
     const container = document.createElement("div");
     container.innerHTML = sanitizeBlockHtml(html, true);
     let output = "";
@@ -509,7 +556,7 @@
     const writeParagraph = (node) => {
       writeGap(elementGap(node, "before"));
       closeList();
-      output += formatPortalParagraphFromNode(node);
+      output += formatPortalParagraphFromNode(node, defaultFontSize);
       writeGap(elementGap(node, "after"));
     };
     const writeBullet = (node) => {
@@ -518,7 +565,7 @@
         output += "<ul>";
         inList = true;
       }
-      output += formatPortalBulletFromNode(node);
+      output += formatPortalBulletFromNode(node, defaultFontSize);
       writeGap(elementGap(node, "after"));
     };
 
@@ -549,7 +596,7 @@
     return output;
   }
 
-  function blocksToPortalHtml(blocks) {
+  function blocksToPortalHtml(blocks, defaultFontSize) {
     let html = "";
     let inList = false;
     const closeList = () => {
@@ -566,13 +613,13 @@
       }
       if (block.kind === "paragraph") {
         closeList();
-        html += `<p>${formatPortalInlineHtml(block.html)}</p>`;
+        html += `<p>${formatPortalInlineHtml(block.html, defaultFontSize)}</p>`;
       } else {
         if (!inList) {
           html += "<ul>";
           inList = true;
         }
-        html += `<li>${formatPortalBulletHtml(block.html)}</li>`;
+        html += `<li>${formatPortalBulletHtml(block.html, defaultFontSize)}</li>`;
       }
       if (block.gapAfter) {
         closeList();
@@ -593,13 +640,14 @@
     ];
   }
 
-  function entrySubjectHtml(entry) {
-    return blocksToPortalHtml(entrySubjectBlocks(entry));
+  function entrySubjectHtml(entry, defaultFontSize) {
+    return blocksToPortalHtml(entrySubjectBlocks(entry), defaultFontSize);
   }
 
   function portalHtmlToBlocks(html) {
     const template = document.createElement("template");
     template.innerHTML = sanitizeBlockHtml(html, false);
+    removePortalTypographyWrappers(template.content);
     const blocks = [];
 
     const withGaps = (element, block) => {
@@ -680,19 +728,19 @@
       const entry = data.entries[slot - 7];
       fields[`standard${slot}`] = entry ? entry.type : "";
       fields[`university${slot}`] = "";
-      fields[`subject${slot}`] = entry ? entrySubjectHtml(entry) : "";
+      fields[`subject${slot}`] = entry ? entrySubjectHtml(entry, data.defaultFontSize) : "";
       VARIANT_IDS.forEach((variantId, index) => {
         fields[`${slot}resume${index + 1}`] = entry && entry.hidden !== true && entry.includeIn.includes(variantId) ? "Y" : "N";
       });
     }
 
-    fields.research_area = formatPortalBlockHtml(data.shared.courseworkHtml);
+    fields.research_area = formatPortalBlockHtml(data.shared.courseworkHtml, data.defaultFontSize);
     data.variants.forEach((variant, index) => {
       const number = index + 1;
       fields[`showminor${number}`] = variant.showMinor ? "Y" : "N";
       fields[`showmicro${number}`] = variant.showMicro ? "Y" : "N";
-      fields[["skill", "skill2", "skill3"][index]] = formatPortalBlockHtml(variant.skillsHtml);
-      fields[["eaa", "objective", "gymkhana"][index]] = formatPortalBlockHtml(variant.extracurricularHtml);
+      fields[["skill", "skill2", "skill3"][index]] = formatPortalBlockHtml(variant.skillsHtml, data.defaultFontSize);
+      fields[["eaa", "objective", "gymkhana"][index]] = formatPortalBlockHtml(variant.extracurricularHtml, data.defaultFontSize);
       for (let position = 1; position <= 14; position += 1) {
         fields[`cv${number}_pref${position}`] = variant.sectionOrder[position - 1] || "";
       }
@@ -749,7 +797,7 @@
       specialization: get("subject6")
     };
 
-    data.shared.courseworkHtml = sanitizeBlockHtml(get("research_area"), false);
+    data.shared.courseworkHtml = normalizeImportedBlockHtml(get("research_area"));
     data.variants.forEach((variant, index) => {
       const number = index + 1;
       variant.sectionOrder = [];
@@ -757,8 +805,8 @@
         const section = get(`cv${number}_pref${position}`);
         if (section) variant.sectionOrder.push(section);
       }
-      variant.skillsHtml = sanitizeBlockHtml(get(["skill", "skill2", "skill3"][index]), false);
-      variant.extracurricularHtml = sanitizeBlockHtml(get(["eaa", "objective", "gymkhana"][index]), false);
+      variant.skillsHtml = normalizeImportedBlockHtml(get(["skill", "skill2", "skill3"][index]));
+      variant.extracurricularHtml = normalizeImportedBlockHtml(get(["eaa", "objective", "gymkhana"][index]));
       variant.showMinor = get(`showminor${number}`) === "Y";
       variant.showMicro = get(`showmicro${number}`) === "Y";
     });
@@ -786,6 +834,8 @@
     SECTION_VALUES,
     VARIANT_IDS,
     DRAFT_KEY,
+    MIN_FONT_SIZE,
+    MAX_FONT_SIZE,
     MAX_GAP_PIXELS,
     clone,
     emptyResume,

@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "defaultFontSize": 10,
   "metadata": {"name": "", "documentId": "resume"},
   "academics": {"previous": [], "current": {"slot": 6, "standard": "", "qualification": "", "institution": "", "completionYear": "", "specialization": "", "score": {"kind": "cgpa", "value": "", "outOf": ""}}},
   "shared": {"courseworkHtml": ""},
