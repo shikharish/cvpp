@@ -28,7 +28,7 @@ var (
 	spaceRE            = regexp.MustCompile(`\s+`)
 	arrowRE            = regexp.MustCompile(`\s*[→➜➝⟶]\s*`)
 	fontSizeRE         = regexp.MustCompile(`(?i)(?:^|;)\s*font-size\s*:\s*(\d{1,2})px\s*(?:;|$)`)
-	compatibleReplacer = strings.NewReplacer("\u2010", "-", "\u2011", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-", "\u2212", "-", "\u2192", " to ", "\u279c", " to ", "\u279d", " to ", "\u27f6", " to ", "\u00d7", "x", "\u2022", "-", "\u25e6", "-", "\u25aa", "-")
+	compatibleReplacer = strings.NewReplacer("\u2010", "-", "\u2011", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-", "\u2212", "-", "\u2018", "'", "\u2019", "'", "\u201a", "'", "\u201b", "'", "\u02bc", "'", "\uff07", "'", "\u2192", " to ", "\u279c", " to ", "\u279d", " to ", "\u27f6", " to ", "\u00d7", "x", "\u2022", "-", "\u25e6", "-", "\u25aa", "-")
 )
 
 type Resume struct {

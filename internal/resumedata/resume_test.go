@@ -23,6 +23,14 @@ func TestPortalFormatting(t *testing.T) {
 	}
 }
 
+func TestPortalFormattingNormalizesPastedApostrophes(t *testing.T) {
+	html := BlocksHTML([]Block{{Kind: "bullet", HTML: `We’re building O’Connor’s tool with it’s copied text.`}})
+	want := `<ul><li><span style="font-size: 10px;">&nbsp;We&#39;re building O&#39;Connor&#39;s tool with it&#39;s copied text.</span></li></ul>`
+	if html != want {
+		t.Fatalf("BlocksHTML()\n got %s\nwant %s", html, want)
+	}
+}
+
 func TestResumeDefaultFontSizeControlsPortalOutput(t *testing.T) {
 	resume := Resume{
 		SchemaVersion:   1,

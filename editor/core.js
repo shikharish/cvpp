@@ -365,6 +365,7 @@
   function portalCompatibleText(value) {
     return text(value)
       .replace(/[\u2010-\u2015\u2212]/g, "-")
+      .replace(/[\u2018\u2019\u201a\u201b\u02bc\uff07]/g, "'")
       .replace(/\s*[\u2192\u279c\u279d\u27f6]\s*/g, " to ")
       .replace(/\u00d7/g, "x")
       .replace(/[\u2022\u25e6\u25aa]/g, "-");
