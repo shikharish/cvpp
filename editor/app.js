@@ -373,8 +373,9 @@
       </div>
       <div class="card-body">
         <div class="form-grid">
-          <div class="field third"><label>Portal category</label><select class="select entry-type" data-entry="${index}">${optionMarkup(Core.ENTRY_TYPES, entry.type, true)}</select></div>
+          <div class="field quarter"><label>Portal category</label><select class="select entry-type" data-entry="${index}">${optionMarkup(Core.ENTRY_TYPES, entry.type, true)}</select></div>
           <div class="field half"><label>Overview / heading</label><input class="input entry-overview" data-entry="${index}" value="${escapeHtml(entry.overview)}"></div>
+          <div class="field quarter"><label>Date</label><input class="input entry-date" data-entry="${index}" value="${escapeHtml(entry.date)}" placeholder="e.g. May 2026 - Jul 2026"></div>
           <div class="field third"><span class="field-label">Include in</span><div class="variant-checks">${Core.VARIANT_IDS.map((id, variantIndex) => `<label class="check"><input type="checkbox" class="entry-include" data-entry="${index}" data-variant="${id}"${entry.includeIn.includes(id) ? " checked" : ""}> CV${variantIndex + 1}</label>`).join("")}</div></div>
         </div>
         <div class="details">${entry.details.map((block, blockIndex) => detailMarkup(block, index, blockIndex, entry.details.length)).join("")}</div>
@@ -392,6 +393,7 @@
       id: `entry-${Date.now()}`,
       type: "Experience",
       overview: "",
+      date: "",
       details: [{ kind: "bullet", html: "" }],
       includeIn: ["cv1"]
     };
@@ -566,6 +568,10 @@
     }));
     workspace.querySelectorAll(".entry-overview").forEach((input) => input.addEventListener("input", () => {
       state.entries[Number(input.dataset.entry)].overview = input.value;
+      markDirty(false);
+    }));
+    workspace.querySelectorAll(".entry-date").forEach((input) => input.addEventListener("input", () => {
+      state.entries[Number(input.dataset.entry)].date = input.value;
       markDirty(false);
     }));
     workspace.querySelectorAll(".entry-include").forEach((input) => input.addEventListener("change", () => {
@@ -867,7 +873,11 @@
   }
 
   function previewEntry(entry) {
-    return `<div class="preview-entry">${Core.sanitizeBlockHtml(Core.entrySubjectHtml(entry, state.defaultFontSize), false)}</div>`;
+    const heading = entry.overview || entry.date
+      ? `<p class="preview-entry-heading"><strong style="font-size: ${state.defaultFontSize}px;"><span>${escapeHtml(entry.overview)}</span><span>${escapeHtml(entry.date)}</span></strong></p>`
+      : "";
+    const details = Core.blocksToPortalHtml(entry.details, state.defaultFontSize);
+    return `<div class="preview-entry">${heading}${Core.sanitizeBlockHtml(details, false)}</div>`;
   }
 
   function sectionEntries(section, variantId) {
@@ -927,8 +937,22 @@
   }
 
   async function quitApp() {
-    try { await apiFetch("/api/app/shutdown", { method: "POST" }); showToast("CV++ is shutting down."); }
-    catch (error) { showDialog("Could not quit CV++", `<p>${escapeHtml(error.message || error)}</p>`); }
+    const button = document.getElementById("quit-app");
+    button.disabled = true;
+    button.textContent = "Signing out…";
+    try {
+      const response = await apiFetch("/api/app/shutdown", { method: "POST" });
+      const payload = await response.json();
+      if (payload.logoutError) {
+        showDialog("CV++ closed with an ERP logout warning", `<p>${escapeHtml(payload.logoutError)}</p><p>CV++ is closing. If ERP still reports an active session, use ERP’s logout option before signing in manually.</p>`);
+      } else {
+        showToast(payload.logoutAttempted ? "ERP session closed. CV++ is shutting down." : "CV++ is shutting down.");
+      }
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Quit CV++";
+      showDialog("Could not quit CV++", `<p>${escapeHtml(error.message || error)}</p>`);
+    }
   }
 
   async function refreshPDF(forceReload) {
@@ -1426,6 +1450,20 @@
     render();
     workspace.focus();
   }));
+  document.getElementById("help-button").addEventListener("click", () => {
+    showDialog("Help", `<ul>
+      <li>i vibecoded this while making my resume and found it useful so thought of sharing with ppl</li>
+      <li>it just has a few features for better user experience and to save time</li>
+      <li>few features:
+        <ul>
+          <li>drag and drop entries to redorder them</li>
+          <li>add any amount of space before or after a line</li>
+          <li>date which automatically right-aligns</li>
+          <li>hide/unhide entries temporarily</li>
+        </ul>
+      </li>
+    </ul>`);
+  });
   document.getElementById("default-font-size").addEventListener("change", (event) => {
     if (!hasDocument) return;
     flushVisibleEditors(true);

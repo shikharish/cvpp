@@ -1,6 +1,7 @@
 package resumedata
 
 import (
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +53,54 @@ func TestResumeDefaultFontSizeControlsPortalOutput(t *testing.T) {
 	}
 }
 
+func TestEntryDateUsesCalculatedHeadingSpacing(t *testing.T) {
+	entry := Entry{
+		ID:        "dated-entry",
+		Type:      "Experience",
+		Overview:  "Example Company | Software Engineer",
+		Date:      "May 2026 - Jul 2026",
+		Details:   []Block{{Kind: "bullet", HTML: "Built a system."}},
+		IncludeIn: []string{"cv1"},
+	}
+	spaces := headingSpacerCount(entry.Overview, entry.Date, PortalFontSize)
+	if spaces <= minHeadingSpaces {
+		t.Fatalf("heading spacer count = %d, want a calculated gap", spaces)
+	}
+	target := PortalHeadingWidth * 1000 / PortalFontSize
+	used := headingTextWidth(entry.Overview) + spaces*headingRuneWidth(' ') + headingTextWidth(entry.Date)
+	if remaining := target - used; remaining < 0 || remaining >= headingRuneWidth(' ') {
+		t.Fatalf("heading width remainder = %d, want 0-%d units", remaining, headingRuneWidth(' ')-1)
+	}
+
+	subject := EntrySubjectHTML(entry)
+	gap := strings.Repeat("&nbsp;", spaces)
+	if !strings.Contains(subject, `<strong>`+entry.Overview+gap+entry.Date+`</strong>`) {
+		t.Fatalf("entry date was not appended with calculated spacing: %s", subject)
+	}
+}
+
+func TestEntryDateSurvivesPortalRoundTrip(t *testing.T) {
+	entry := Entry{
+		ID:        "dated-entry",
+		Type:      "Project",
+		Overview:  "Distributed Scheduler",
+		Date:      "Spring 2026",
+		Details:   []Block{{Kind: "bullet", HTML: "Built a scheduler."}},
+		IncludeIn: []string{"cv1"},
+	}
+	resume, err := ConvertPortalForm(url.Values{
+		"standard7": {entry.Type},
+		"subject7":  {EntrySubjectHTML(entry)},
+		"7resume1":  {"Y"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resume.Entries) != 1 || resume.Entries[0].Overview != entry.Overview || resume.Entries[0].Date != entry.Date {
+		t.Fatalf("round-tripped entry = %#v", resume.Entries)
+	}
+}
+
 func TestResumeRejectsInvalidDefaultFontSize(t *testing.T) {
 	resume := Resume{SchemaVersion: 1, DefaultFontSize: 25, Variants: []Variant{{ID: "cv1"}, {ID: "cv2"}, {ID: "cv3"}}}
 	if err := resume.Validate(); err == nil || !strings.Contains(err.Error(), "default font size") {
@@ -70,6 +119,9 @@ func TestCanonicalResumeMapsToERP(t *testing.T) {
 	}
 	if !strings.HasPrefix(fields["subject7"], `<p><span style="font-size: 10px;"><strong>Example Company`) {
 		t.Fatal("example resume did not move entry overview into the portal body")
+	}
+	if !strings.Contains(fields["subject7"], `May 2026 - July 2026</strong>`) || !strings.Contains(fields["subject7"], `&nbsp;&nbsp;&nbsp;&nbsp;`) {
+		t.Fatal("example resume did not right-align its free-form date in the entry heading")
 	}
 	if !strings.Contains(fields["subject7"], `<ul><li><span style="font-size: 10px;">`) {
 		t.Fatal("example resume did not use portal unordered-list bullets")

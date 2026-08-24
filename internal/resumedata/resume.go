@@ -20,6 +20,12 @@ const (
 	MinFontSize    = 8
 	MaxFontSize    = 24
 	MaxGapPixels   = 24
+
+	// PortalHeadingWidth is the usable width of an ERP entry heading at the
+	// browser-to-PDF scale used by the portal. Heading dates are positioned with
+	// non-breaking spaces because ERP has no right-aligned entry-date column.
+	PortalHeadingWidth = 680
+	minHeadingSpaces   = 4
 )
 
 var (
@@ -86,6 +92,7 @@ type Entry struct {
 	ID        string   `json:"id"`
 	Type      string   `json:"type"`
 	Overview  string   `json:"overview"`
+	Date      string   `json:"date,omitempty"`
 	Details   []Block  `json:"details"`
 	IncludeIn []string `json:"includeIn"`
 	Hidden    bool     `json:"hidden,omitempty"`
@@ -288,21 +295,65 @@ func EntrySubjectHTML(entry Entry) string {
 }
 
 func entrySubjectHTML(entry Entry, fontSize int) string {
-	return blocksHTML(entrySubjectBlocks(entry), fontSize)
+	return blocksHTML(entrySubjectBlocks(entry, fontSize), fontSize)
 }
 
-func entrySubjectBlocks(entry Entry) []Block {
+func entrySubjectBlocks(entry Entry, fontSize int) []Block {
 	overview := strings.TrimSpace(entry.Overview)
-	if overview == "" {
+	date := strings.TrimSpace(entry.Date)
+	if overview == "" && date == "" {
 		return entry.Details
+	}
+	heading := html.EscapeString(overview)
+	if date != "" {
+		heading += strings.Repeat("\u00a0", headingSpacerCount(overview, date, fontSize)) + html.EscapeString(date)
 	}
 	blocks := make([]Block, 0, len(entry.Details)+1)
 	blocks = append(blocks, Block{
 		Kind: "paragraph",
-		HTML: "<strong>" + html.EscapeString(overview) + "</strong>",
+		HTML: "<strong>" + heading + "</strong>",
 	})
 	blocks = append(blocks, entry.Details...)
 	return blocks
+}
+
+// headingSpacerCount converts the remaining line width into non-breaking
+// spaces. These width buckets approximate the ERP heading's bold font.
+func headingSpacerCount(overview, date string, fontSize int) int {
+	fontSize = normalizedFontSize(fontSize)
+	remainingUnits := PortalHeadingWidth*1000/fontSize - headingTextWidth(compatibleText(overview)) - headingTextWidth(compatibleText(date))
+	spaces := remainingUnits / headingRuneWidth(' ')
+	if spaces < minHeadingSpaces {
+		return minHeadingSpaces
+	}
+	return spaces
+}
+
+func headingTextWidth(value string) int {
+	width := 0
+	for _, character := range value {
+		width += headingRuneWidth(character)
+	}
+	return width
+}
+
+func headingRuneWidth(character rune) int {
+	switch {
+	case character == ' ':
+		return 278
+	case strings.ContainsRune("fijltI.,:;!'|[](){}", character):
+		return 278
+	case strings.ContainsRune("-_/\\", character):
+		return 333
+	case strings.ContainsRune("mwMW@%&QO", character):
+		return 833
+	case character >= 'A' && character <= 'Z':
+		return 667
+	case character >= '0' && character <= '9':
+		return 556
+	default:
+		return 556
+	}
 }
 
 func BlocksHTML(blocks []Block) string {

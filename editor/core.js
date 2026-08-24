@@ -39,6 +39,8 @@
   const MIN_FONT_SIZE = 8;
   const MAX_FONT_SIZE = 24;
   const MAX_GAP_PIXELS = 24;
+  const PORTAL_HEADING_WIDTH = 680;
+  const MIN_HEADING_SPACES = 4;
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -193,6 +195,7 @@
           id: text(entry.id) || `entry-${index + 1}`,
           type: text(entry.type),
           overview: text(entry.overview),
+          date: text(entry.date),
           details: (Array.isArray(entry.details) ? entry.details : []).map((block) => {
             const detail = {
               kind: block && block.kind === "paragraph" ? "paragraph" : "bullet",
@@ -631,18 +634,73 @@
     return html;
   }
 
-  function entrySubjectBlocks(entry) {
+  function headingRuneWidth(character) {
+    if (character === " ") return 278;
+    if ("fijltI.,:;!'|[](){}".includes(character)) return 278;
+    if ("-_/\\".includes(character)) return 333;
+    if ("mwMW@%&QO".includes(character)) return 833;
+    if (/^[A-Z]$/.test(character)) return 667;
+    return 556;
+  }
+
+  function headingTextWidth(value) {
+    return Array.from(portalCompatibleText(value)).reduce((width, character) => width + headingRuneWidth(character), 0);
+  }
+
+  function headingSpacerCount(overview, date, defaultFontSize) {
+    const remainingUnits = PORTAL_HEADING_WIDTH * 1000 / fontSize(defaultFontSize)
+      - headingTextWidth(overview)
+      - headingTextWidth(date);
+    return Math.max(MIN_HEADING_SPACES, Math.floor(remainingUnits / headingRuneWidth(" ")));
+  }
+
+  function entrySubjectBlocks(entry, defaultFontSize) {
     const overview = text(entry && entry.overview).trim();
+    const date = text(entry && entry.date).trim();
     const details = Array.isArray(entry && entry.details) ? entry.details : [];
-    if (!overview) return details;
+    if (!overview && !date) return details;
+    const heading = escapeHtml(overview) + (date
+      ? "\u00a0".repeat(headingSpacerCount(overview, date, defaultFontSize)) + escapeHtml(date)
+      : "");
     return [
-      { kind: "paragraph", html: `<strong>${escapeHtml(overview)}</strong>` },
+      { kind: "paragraph", html: `<strong>${heading}</strong>` },
       ...details
     ];
   }
 
   function entrySubjectHtml(entry, defaultFontSize) {
-    return blocksToPortalHtml(entrySubjectBlocks(entry), defaultFontSize);
+    return blocksToPortalHtml(entrySubjectBlocks(entry, defaultFontSize), defaultFontSize);
+  }
+
+  function splitImportedHeading(value) {
+    const matches = Array.from(text(value).matchAll(/[\u00a0 ]{4,}/g));
+    if (!matches.length) return { overview: portalCompatibleText(value).replace(/\s+/g, " ").trim(), date: "" };
+    const gap = matches.reduce((longest, candidate) => candidate[0].length > longest[0].length ? candidate : longest);
+    const normalize = (part) => portalCompatibleText(part).replace(/\s+/g, " ").trim();
+    return {
+      overview: normalize(value.slice(0, gap.index)),
+      date: normalize(value.slice(gap.index + gap[0].length))
+    };
+  }
+
+  function portalEntryContent(html) {
+    const template = document.createElement("template");
+    template.innerHTML = sanitizeBlockHtml(html, false);
+    removePortalTypographyWrappers(template.content);
+    const first = Array.from(template.content.childNodes).find((node) => (
+      node.nodeType === Node.ELEMENT_NODE || (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim())
+    ));
+    let heading = { overview: "", date: "" };
+    if (first && first.nodeType === Node.ELEMENT_NODE && first.tagName === "P") {
+      const strong = first.querySelector("strong, b");
+      const lineText = (first.textContent || "").trim();
+      const strongText = strong ? (strong.textContent || "").trim() : "";
+      if (strong && lineText && lineText === strongText) {
+        heading = splitImportedHeading(first.textContent || "");
+        first.remove();
+      }
+    }
+    return { ...heading, details: portalHtmlToBlocks(template.innerHTML) };
   }
 
   function portalHtmlToBlocks(html) {
@@ -817,11 +875,13 @@
       const overview = get(`university${slot}`);
       const subject = get(`subject${slot}`);
       if (!type && !overview && !subject) continue;
+      const content = portalEntryContent(subject);
       data.entries.push({
         id: `portal-entry-${slot}`,
         type,
-        overview,
-        details: portalHtmlToBlocks(subject),
+        overview: overview || content.overview,
+        date: content.date,
+        details: content.details,
         includeIn: VARIANT_IDS.filter((_, index) => get(`${slot}resume${index + 1}`) === "Y")
       });
     }
@@ -838,6 +898,7 @@
     MIN_FONT_SIZE,
     MAX_FONT_SIZE,
     MAX_GAP_PIXELS,
+    PORTAL_HEADING_WIDTH,
     clone,
     emptyResume,
     normalizeResume,
@@ -850,6 +911,7 @@
     blocksToPortalHtml,
     entrySubjectBlocks,
     entrySubjectHtml,
+    headingSpacerCount,
     portalHtmlToBlocks,
     createPortalFieldMap,
     importPortalSnapshot

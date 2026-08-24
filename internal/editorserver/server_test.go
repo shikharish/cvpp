@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,6 +135,93 @@ func TestFriendlyErrorDoesNotGuessSessionExpiry(t *testing.T) {
 	want := "ERP did not keep this login active. Try again with the newest OTP. Your local resume was not changed."
 	if got := friendlyError(erp.ErrSessionRejected); got != want {
 		t.Fatalf("friendlyError(session rejection) = %q, want %q", got, want)
+	}
+}
+
+func TestShutdownWaitsForLogoutAndReportsSuccess(t *testing.T) {
+	secrets := t.TempDir()
+	if err := os.WriteFile(filepath.Join(secrets, ".session"), []byte("ssoToken=test-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logoutRequested := make(chan struct{}, 1)
+	erpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/IIT_ERP3/logout.htm" {
+			http.NotFound(writer, request)
+			return
+		}
+		logoutRequested <- struct{}{}
+		fmt.Fprint(writer, "logged out")
+	}))
+	defer erpServer.Close()
+	client, _ := erp.New(erpServer.URL, secrets)
+	keeper := newSessionKeeper(time.Hour)
+	keeper.SetClient(client)
+	shutdown := make(chan struct{}, 1)
+	server := &Server{options: Options{BaseURL: erpServer.URL, SecretsDir: secrets}, keepAlive: keeper, shutdown: func() { shutdown <- struct{}{} }}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/app/shutdown", nil)
+	response := httptest.NewRecorder()
+	server.handleShutdown(response, request)
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["logoutAttempted"] != true || payload["logoutOK"] != true || payload["logoutError"] != nil {
+		t.Fatalf("shutdown response = %#v", payload)
+	}
+	select {
+	case <-logoutRequested:
+	default:
+		t.Fatal("shutdown returned before requesting ERP logout")
+	}
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("server did not shut down after logout")
+	}
+}
+
+func TestShutdownReportsLogoutFailureAndStillCloses(t *testing.T) {
+	secrets := t.TempDir()
+	if err := os.WriteFile(filepath.Join(secrets, ".session"), []byte("ssoToken=test-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	erpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer erpServer.Close()
+	client, _ := erp.New(erpServer.URL, secrets)
+	keeper := newSessionKeeper(time.Hour)
+	keeper.SetClient(client)
+	shutdown := make(chan struct{}, 1)
+	server := &Server{options: Options{BaseURL: erpServer.URL, SecretsDir: secrets}, keepAlive: keeper, shutdown: func() { shutdown <- struct{}{} }}
+
+	response := httptest.NewRecorder()
+	server.handleShutdown(response, httptest.NewRequest(http.MethodPost, "/api/app/shutdown", nil))
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["logoutOK"] != false || !strings.Contains(fmt.Sprint(payload["logoutError"]), "503") {
+		t.Fatalf("shutdown response = %#v", payload)
+	}
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("server stayed open after failed ERP logout")
+	}
+}
+
+func TestAppShutsDownAfterWindowDisconnectGracePeriod(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	shutdown := make(chan struct{}, 1)
+	server := &Server{lastActivity: time.Now(), jobs: &jobRunner{}, shutdown: func() { shutdown <- struct{}{} }}
+	go server.stopWhenIdleAfter(ctx, 5*time.Millisecond, 20*time.Millisecond)
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("app did not shut down after its window disconnected")
 	}
 }
 

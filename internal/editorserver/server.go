@@ -39,23 +39,32 @@ type Options struct {
 
 var version = "dev"
 
+const (
+	shutdownLogoutTimeout = 15 * time.Second
+	appIdleCheckInterval  = time.Second
+	appIdleShutdownDelay  = 5 * time.Second
+)
+
 type Server struct {
-	options        Options
-	paths          appdata.Paths
-	host           string
-	bootstrapToken string
-	sessionToken   string
-	bootstrapUsed  bool
-	mu             sync.Mutex
-	connected      int
-	lastActivity   time.Time
-	shutdown       context.CancelFunc
-	instance       *appdata.Instance
-	otp            *erp.InteractiveOTP
-	securityAnswer *erp.InteractiveSecurityAnswer
-	keepAlive      *sessionKeeper
-	events         *eventHub
-	jobs           *jobRunner
+	options         Options
+	paths           appdata.Paths
+	host            string
+	bootstrapToken  string
+	sessionToken    string
+	bootstrapUsed   bool
+	mu              sync.Mutex
+	connected       int
+	lastActivity    time.Time
+	shutdown        context.CancelFunc
+	instance        *appdata.Instance
+	otp             *erp.InteractiveOTP
+	securityAnswer  *erp.InteractiveSecurityAnswer
+	keepAlive       *sessionKeeper
+	events          *eventHub
+	jobs            *jobRunner
+	logoutOnce      sync.Once
+	logoutAttempted bool
+	logoutErr       error
 }
 
 func Serve(ctx context.Context, options Options) error {
@@ -106,6 +115,7 @@ func Serve(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
+	defer server.logoutERP()
 	server.instance = instance
 	defer instance.Close()
 	defer server.securityAnswer.Close()
@@ -235,13 +245,24 @@ func securityHeaders(s *Server, next http.Handler) http.Handler {
 		s.connected++
 		s.lastActivity = time.Now()
 		s.mu.Unlock()
-		defer func() { s.mu.Lock(); s.connected--; s.mu.Unlock() }()
+		defer func() {
+			s.mu.Lock()
+			s.connected--
+			if s.connected == 0 {
+				s.lastActivity = time.Now()
+			}
+			s.mu.Unlock()
+		}()
 		next.ServeHTTP(w, r)
 	})
 }
 
 func (s *Server) stopWhenIdle(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	s.stopWhenIdleAfter(ctx, appIdleCheckInterval, appIdleShutdownDelay)
+}
+
+func (s *Server) stopWhenIdleAfter(ctx context.Context, checkInterval, idleDelay time.Duration) {
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -249,7 +270,7 @@ func (s *Server) stopWhenIdle(ctx context.Context) {
 			return
 		case now := <-ticker.C:
 			s.mu.Lock()
-			idle := s.connected == 0 && now.Sub(s.lastActivity) >= 30*time.Minute
+			idle := s.connected == 0 && now.Sub(s.lastActivity) >= idleDelay
 			s.mu.Unlock()
 			if idle && !s.jobs.isRunning() {
 				if s.shutdown != nil {
@@ -442,10 +463,74 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "shuttingDown": true})
+	attempted, logoutErr := s.logoutERP()
+	response := map[string]any{"ok": true, "shuttingDown": true, "logoutAttempted": attempted, "logoutOK": logoutErr == nil}
+	if logoutErr != nil {
+		response["logoutError"] = logoutErr.Error()
+	}
+	writeJSON(w, response)
 	if s.shutdown != nil {
 		go s.shutdown()
 	}
+}
+
+func (s *Server) logoutERP() (bool, error) {
+	s.logoutOnce.Do(func() {
+		defer func() {
+			if s.logoutErr != nil {
+				progress.Logf("ERP session: logout failed; CV++ will still close (%v)", s.logoutErr)
+			}
+		}()
+		var client *erp.Client
+		if s.keepAlive != nil {
+			client = s.keepAlive.current()
+		}
+		secretsDir := s.secretsDir()
+		if client == nil && secretsDir == "" {
+			return
+		}
+
+		needsRestore := client == nil
+		if needsRestore {
+			if _, err := os.Stat(filepath.Join(secretsDir, ".session")); err != nil {
+				if os.IsNotExist(err) {
+					return
+				}
+				s.logoutAttempted = true
+				s.logoutErr = fmt.Errorf("inspect saved ERP session: %w", err)
+				return
+			}
+			s.logoutAttempted = true
+			var err error
+			client, err = erp.New(s.options.BaseURL, secretsDir)
+			if err != nil {
+				s.logoutErr = fmt.Errorf("prepare ERP logout: %w", err)
+				return
+			}
+		} else {
+			s.logoutAttempted = true
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownLogoutTimeout)
+		defer cancel()
+		if needsRestore {
+			err := client.RestoreSavedSession(ctx)
+			if err != nil {
+				if errors.Is(err, erp.ErrSessionRejected) {
+					s.logoutErr = client.DiscardSavedSession()
+					return
+				}
+				s.logoutErr = fmt.Errorf("restore ERP session for logout: %w", err)
+				return
+			}
+		}
+
+		s.logoutErr = client.Logout(ctx)
+		if s.logoutErr == nil && s.keepAlive != nil {
+			s.keepAlive.clear(client)
+		}
+	})
+	return s.logoutAttempted, s.logoutErr
 }
 
 func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {

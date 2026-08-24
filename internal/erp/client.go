@@ -139,6 +139,45 @@ func (c *Client) KeepAlive(ctx context.Context) error {
 	return nil
 }
 
+// Logout closes the authenticated IIT ERP session represented by this
+// client's cookie jar. The saved SSO token is removed only after ERP accepts
+// the logout request, so a transient network failure can be retried later.
+func (c *Client) Logout(ctx context.Context) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/IIT_ERP3/logout.htm", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	request.Header.Set("Accept-Language", "en-US,en;q=0.9,en-GB;q=0.8")
+	request.Header.Set("Referer", c.BaseURL+"/IIT_ERP3/home.htm")
+	request.Header.Set("Sec-Fetch-Dest", "document")
+	request.Header.Set("Sec-Fetch-Mode", "navigate")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.Header.Set("Sec-Fetch-User", "?1")
+	request.Header.Set("Upgrade-Insecure-Requests", "1")
+	request.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36")
+
+	response, err := c.HTTP.Do(request)
+	if err != nil {
+		return fmt.Errorf("ERP logout request: %w", safeHTTPError(err))
+	}
+	_, readErr := readLimited(response.Body, 2<<20)
+	response.Body.Close()
+	if readErr != nil {
+		return fmt.Errorf("read ERP logout response: %w", readErr)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("ERP logout returned %s", response.Status)
+	}
+	if err := c.DiscardSavedSession(); err != nil {
+		return fmt.Errorf("ERP logout succeeded but local session cleanup failed: %w", err)
+	}
+	c.trainingPlacementReady = false
+	c.sessionToken = ""
+	progress.Logf("ERP session: logout succeeded")
+	return nil
+}
+
 // LoadCredentials reads the local credential file for setup and tests. It is
 // intentionally not used by any GET handler, so secrets cannot be reflected
 // through the browser API.

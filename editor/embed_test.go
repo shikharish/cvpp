@@ -143,3 +143,31 @@ func TestDefaultAndInlineFontSizesReachPortalOutput(t *testing.T) {
 		t.Fatal("default font size control must update resume state")
 	}
 }
+
+func TestEntryDateFieldReachesCalculatedPortalHeading(t *testing.T) {
+	core, err := Files.ReadFile("core.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(core), "date: text(entry.date)") || !strings.Contains(string(core), "headingSpacerCount(overview, date, defaultFontSize)") {
+		t.Fatal("entry dates must be normalized and spaced in portal headings")
+	}
+	if !strings.Contains(string(app), `class="input entry-date"`) || !strings.Contains(string(app), `.date = input.value`) {
+		t.Fatal("editor must expose and persist the free-form entry date")
+	}
+}
+
+func TestQuitReportsERPLogoutFailure(t *testing.T) {
+	app, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(app)
+	if !strings.Contains(content, "payload.logoutError") || !strings.Contains(content, "closed with an ERP logout warning") {
+		t.Fatal("quit flow must show an ERP logout failure while allowing CV++ to close")
+	}
+}

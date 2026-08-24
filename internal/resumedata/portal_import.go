@@ -54,7 +54,7 @@ func ConvertPortalForm(values url.Values) (*Resume, error) {
 		if !entryTypeAllowed(typeName) {
 			typeName = "Experience"
 		}
-		blocks, heading := importBlocks(subject)
+		blocks, heading, date := importBlocks(subject)
 		overview := firstValue(values, "overview"+itoa(slot), "title"+itoa(slot), "heading"+itoa(slot))
 		if strings.TrimSpace(overview) == "" {
 			overview = institution
@@ -76,7 +76,7 @@ func ConvertPortalForm(values url.Values) (*Resume, error) {
 			// in CV1 is the least surprising editable result.
 			include = []string{"cv1"}
 		}
-		resume.Entries = append(resume.Entries, Entry{ID: "portal-" + itoa(slot), Type: typeName, Overview: strings.TrimSpace(overview), Details: blocks, IncludeIn: include})
+		resume.Entries = append(resume.Entries, Entry{ID: "portal-" + itoa(slot), Type: typeName, Overview: strings.TrimSpace(overview), Date: date, Details: blocks, IncludeIn: include})
 	}
 	if err := resume.Validate(); err != nil {
 		return nil, err
@@ -110,10 +110,10 @@ func itoa(value int) string {
 
 func entryTypeAllowed(value string) bool { return entryTypes[value] }
 
-func importBlocks(source string) ([]Block, string) {
+func importBlocks(source string) ([]Block, string, string) {
 	nodes, err := parseFragment(source)
 	if err != nil {
-		return nil, ""
+		return nil, "", ""
 	}
 	var blocks []Block
 	for _, node := range nodes {
@@ -137,13 +137,37 @@ func importBlocks(source string) ([]Block, string) {
 		}
 	}
 	heading := ""
+	date := ""
 	if len(blocks) > 0 && blocks[0].Kind == "paragraph" {
 		if firstIsBold(nodes) {
-			heading = CompatibleText(html.UnescapeString(stripTags(blocks[0].HTML)))
+			heading, date = splitImportedHeading(html.UnescapeString(stripTags(blocks[0].HTML)))
 			blocks = blocks[1:]
 		}
 	}
-	return blocks, strings.TrimSpace(heading)
+	return blocks, strings.TrimSpace(heading), strings.TrimSpace(date)
+}
+
+func splitImportedHeading(value string) (string, string) {
+	runes := []rune(value)
+	bestStart, bestEnd := -1, -1
+	for start := 0; start < len(runes); {
+		if runes[start] != ' ' && runes[start] != '\u00a0' {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(runes) && (runes[end] == ' ' || runes[end] == '\u00a0') {
+			end++
+		}
+		if end-start >= minHeadingSpaces && end-start > bestEnd-bestStart {
+			bestStart, bestEnd = start, end
+		}
+		start = end
+	}
+	if bestStart < 0 {
+		return CompatibleText(value), ""
+	}
+	return CompatibleText(string(runes[:bestStart])), CompatibleText(string(runes[bestEnd:]))
 }
 
 func firstIsBold(nodes []*xhtml.Node) bool {

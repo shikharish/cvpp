@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,68 @@ func (value staticOTP) Wait(context.Context) (string, error) { return string(val
 type countingOTP struct {
 	prepareCalls int
 	waitCalls    int
+}
+
+func TestLogoutUsesAuthenticatedCookiesAndRemovesSavedSession(t *testing.T) {
+	secrets := t.TempDir()
+	sessionPath := filepath.Join(secrets, ".session")
+	if err := os.WriteFile(sessionPath, []byte("ssoToken=saved-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requested := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requested = true
+		if request.URL.Path != "/IIT_ERP3/logout.htm" {
+			t.Errorf("logout path = %q", request.URL.Path)
+		}
+		if request.Referer() != serverURL(request)+"/IIT_ERP3/home.htm" {
+			t.Errorf("logout referer = %q", request.Referer())
+		}
+		if cookie, err := request.Cookie("JSID_IIT_ERP3"); err != nil || cookie.Value != "active-session" {
+			t.Errorf("logout cookie = %#v, %v", cookie, err)
+		}
+		fmt.Fprint(writer, `<html><title>Logged out</title></html>`)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := url.Parse(server.URL + "/")
+	client.HTTP.Jar.SetCookies(root, []*http.Cookie{{Name: "JSID_IIT_ERP3", Value: "active-session", Path: "/"}})
+	if err := client.Logout(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !requested {
+		t.Fatal("ERP logout endpoint was not requested")
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("saved session still exists after logout: %v", err)
+	}
+}
+
+func TestLogoutFailureRetainsSavedSession(t *testing.T) {
+	secrets := t.TempDir()
+	sessionPath := filepath.Join(secrets, ".session")
+	if err := os.WriteFile(sessionPath, []byte("ssoToken=saved-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client, _ := New(server.URL, secrets)
+	if err := client.Logout(context.Background()); err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("Logout() error = %v", err)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("saved session was removed after failed logout: %v", err)
+	}
+}
+
+func serverURL(request *http.Request) string {
+	return "http://" + request.Host
 }
 
 func (provider *countingOTP) Prepare(context.Context) error {

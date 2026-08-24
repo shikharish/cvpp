@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,7 +31,9 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 || strings.HasPrefix(os.Args[1], "-") {
-		fatal(runApp(parseAppFlags(os.Args[1:])))
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		fatal(runApp(ctx, parseAppFlags(os.Args[1:])))
 		return
 	}
 	repoRoot, err := os.Getwd()
@@ -45,7 +48,9 @@ func main() {
 	switch os.Args[1] {
 	case "editor":
 		options := parseEditorFlags(os.Args[2:])
-		fatal(runEditor(repoRoot, options))
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		fatal(runEditor(ctx, repoRoot, options))
 	case "erp":
 		options := parseERPFlags("erp", os.Args[2:])
 		fatal(runERP(repoRoot, options))
@@ -141,7 +146,7 @@ func parseERPFlags(name string, args []string) erpOptions {
 	return options
 }
 
-func runEditor(repoRoot string, options editorOptions) error {
+func runEditor(ctx context.Context, repoRoot string, options editorOptions) error {
 	serverOptions := editorserver.Options{
 		RepoRoot:   repoRoot,
 		Addr:       options.addr,
@@ -158,10 +163,10 @@ func runEditor(repoRoot string, options editorOptions) error {
 			return openEditorBrowser(runtime.GOOS, url)
 		}
 	}
-	return editorserver.Serve(context.Background(), serverOptions)
+	return editorserver.Serve(ctx, serverOptions)
 }
 
-func runApp(options appOptions) error {
+func runApp(ctx context.Context, options appOptions) error {
 	paths, err := appdata.Resolve(options.dataDir)
 	if err != nil {
 		return err
@@ -178,7 +183,7 @@ func runApp(options appOptions) error {
 		},
 		OpenERPURL: func(url string) error { return openBrowser(runtime.GOOS, url) },
 	}
-	err = editorserver.Serve(context.Background(), serverOptions)
+	err = editorserver.Serve(ctx, serverOptions)
 	if err != nil && errors.Is(err, appdata.ErrAlreadyRunning) {
 		if state, readErr := appdata.ReadRuntimeState(paths.RuntimeState); readErr == nil && state.URL != "" {
 			if !options.open {

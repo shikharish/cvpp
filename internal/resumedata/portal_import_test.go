@@ -62,3 +62,21 @@ func TestConvertPortalFormUsesPortalHeadingAndEmptyForms(t *testing.T) {
 		t.Fatalf("empty import = %#v", empty)
 	}
 }
+
+func TestConvertPortalFormSplitsCalculatedHeadingDate(t *testing.T) {
+	resume, err := ConvertPortalForm(url.Values{
+		"standard7": {"Internship"},
+		"subject7":  {`<p><span style="font-size: 10px;"><strong>Acme | Intern&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;May 2026 - Jul 2026</strong></span></p><ul><li>Built safely</li></ul>`},
+		"7resume1":  {"Y"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := resume.Entries[0]
+	if entry.Overview != "Acme | Intern" || entry.Date != "May 2026 - Jul 2026" {
+		t.Fatalf("heading fields = overview %q, date %q", entry.Overview, entry.Date)
+	}
+	if len(entry.Details) != 1 || entry.Details[0].HTML != "Built safely" {
+		t.Fatalf("details = %#v", entry.Details)
+	}
+}

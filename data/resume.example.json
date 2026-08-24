@@ -121,7 +121,8 @@
     {
       "id": "example-internship",
       "type": "Internship",
-      "overview": "Example Company | Software Engineering Intern | May 2026 - July 2026",
+      "overview": "Example Company | Software Engineering Intern",
+      "date": "May 2026 - July 2026",
       "details": [
         {
           "kind": "bullet",
@@ -145,7 +146,8 @@
     {
       "id": "example-systems-project",
       "type": "Project",
-      "overview": "Distributed Job Scheduler | C++, Linux | Jan 2026 - Feb 2026",
+      "overview": "Distributed Job Scheduler | C++, Linux",
+      "date": "Jan 2026 - Feb 2026",
       "details": [
         {
           "kind": "bullet",
@@ -189,7 +191,8 @@
     {
       "id": "example-por",
       "type": "Position of Responsibilities",
-      "overview": "Example Technology Society | Events Coordinator | 2025 - 2026",
+      "overview": "Example Technology Society | Events Coordinator",
+      "date": "2025 - 2026",
       "details": [
         {
           "kind": "bullet",
