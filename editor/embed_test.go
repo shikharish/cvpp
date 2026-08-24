@@ -144,7 +144,7 @@ func TestDefaultAndInlineFontSizesReachPortalOutput(t *testing.T) {
 	}
 }
 
-func TestEntryDateFieldReachesCalculatedPortalHeading(t *testing.T) {
+func TestEntryDateFieldReachesExactPortalHeadingSpacing(t *testing.T) {
 	core, err := Files.ReadFile("core.js")
 	if err != nil {
 		t.Fatal(err)
@@ -153,8 +153,11 @@ func TestEntryDateFieldReachesCalculatedPortalHeading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(core), "date: text(entry.date)") || !strings.Contains(string(core), "headingSpacerCount(overview, date, defaultFontSize)") {
-		t.Fatal("entry dates must be normalized and spaced in portal headings")
+	if !strings.Contains(string(core), "date: text(entry.date)") || !strings.Contains(string(core), "headingSpacerCount(overview, date, defaultFontSize)") || !strings.Contains(string(core), "CALIBRI_ASCII_WIDTHS") {
+		t.Fatal("entry dates must use the ERP Calibri metrics when spacing portal headings")
+	}
+	if !strings.Contains(string(core), "migrateLegacyEntryHeading(normalized)") {
+		t.Fatal("legacy formatted headings must be promoted to the overview and date fields")
 	}
 	if !strings.Contains(string(app), `class="input entry-date"`) || !strings.Contains(string(app), `.date = input.value`) {
 		t.Fatal("editor must expose and persist the free-form entry date")

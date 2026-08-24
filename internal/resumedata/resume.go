@@ -16,15 +16,11 @@ import (
 )
 
 const (
-	PortalFontSize = 10
-	MinFontSize    = 8
-	MaxFontSize    = 24
-	MaxGapPixels   = 24
-
-	// PortalHeadingWidth is the usable width of an ERP entry heading at the
-	// browser-to-PDF scale used by the portal. Heading dates are positioned with
-	// non-breaking spaces because ERP has no right-aligned entry-date column.
-	PortalHeadingWidth = 680
+	PortalFontSize     = 10
+	MinFontSize        = 8
+	MaxFontSize        = 24
+	MaxGapPixels       = 24
+	PortalHeadingWidth = 571
 	minHeadingSpaces   = 4
 )
 
@@ -34,7 +30,19 @@ var (
 	spaceRE            = regexp.MustCompile(`\s+`)
 	arrowRE            = regexp.MustCompile(`\s*[→➜➝⟶]\s*`)
 	fontSizeRE         = regexp.MustCompile(`(?i)(?:^|;)\s*font-size\s*:\s*(\d{1,2})px\s*(?:;|$)`)
+	floatRightRE       = regexp.MustCompile(`(?i)(?:^|;)\s*float\s*:\s*right\s*(?:;|$)`)
+	legacyHeadingTagRE = regexp.MustCompile(`(?i)<(?:strong|b|em|i)(?:\s|>)`)
 	compatibleReplacer = strings.NewReplacer("\u2010", "-", "\u2011", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-", "\u2212", "-", "\u2018", "'", "\u2019", "'", "\u201a", "'", "\u201b", "'", "\u02bc", "'", "\uff07", "'", "\u2192", " to ", "\u279c", " to ", "\u279d", " to ", "\u27f6", " to ", "\u00d7", "x", "\u2022", "-", "\u25e6", "-", "\u25aa", "-")
+	// These are the printable ASCII widths declared by the Calibri font in
+	// ERP-generated PDFs, indexed from character 32 through 126.
+	calibriASCIIWidths = [...]int{
+		226, 0, 0, 498, 0, 714, 682, 220, 303, 303, 0, 498, 249, 306, 252, 386,
+		506, 506, 506, 506, 506, 506, 506, 506, 506, 506, 267, 0, 0, 0, 0, 0,
+		0, 578, 543, 533, 615, 488, 459, 630, 623, 251, 318, 519, 420, 854, 645, 662,
+		516, 672, 542, 459, 487, 641, 567, 889, 519, 487, 0, 306, 0, 306, 0, 498,
+		0, 479, 525, 422, 525, 497, 305, 470, 525, 229, 239, 454, 229, 798, 525, 527,
+		525, 525, 348, 391, 334, 525, 451, 714, 433, 452, 395, 0, 460, 0, 0,
+	}
 )
 
 type Resume struct {
@@ -115,6 +123,7 @@ func Load(path string) (*Resume, error) {
 	if err := json.Unmarshal(data, &resume); err != nil {
 		return nil, fmt.Errorf("parse resume JSON: %w", err)
 	}
+	resume.migrateLegacyHeadings()
 	if err := resume.Validate(); err != nil {
 		return nil, err
 	}
@@ -317,8 +326,9 @@ func entrySubjectBlocks(entry Entry, fontSize int) []Block {
 	return blocks
 }
 
-// headingSpacerCount converts the remaining line width into non-breaking
-// spaces. These width buckets approximate the ERP heading's bold font.
+// headingSpacerCount uses the Calibri widths and 571-point content area found
+// in ERP-generated A4 PDFs. Very long headings retain a small non-breaking gap
+// instead of wrapping the entire date suffix onto another line.
 func headingSpacerCount(overview, date string, fontSize int) int {
 	fontSize = normalizedFontSize(fontSize)
 	remainingUnits := PortalHeadingWidth*1000/fontSize - headingTextWidth(compatibleText(overview)) - headingTextWidth(compatibleText(date))
@@ -338,21 +348,45 @@ func headingTextWidth(value string) int {
 }
 
 func headingRuneWidth(character rune) int {
-	switch {
-	case character == ' ':
-		return 278
-	case strings.ContainsRune("fijltI.,:;!'|[](){}", character):
-		return 278
-	case strings.ContainsRune("-_/\\", character):
-		return 333
-	case strings.ContainsRune("mwMW@%&QO", character):
-		return 833
-	case character >= 'A' && character <= 'Z':
-		return 667
-	case character >= '0' && character <= '9':
-		return 556
-	default:
-		return 556
+	if character == '\u00a0' {
+		return 226
+	}
+	if character >= 32 && character <= 126 {
+		if width := calibriASCIIWidths[int(character)-32]; width > 0 {
+			return width
+		}
+	}
+	return 498
+}
+
+// migrateLegacyHeadings promotes headings created before the dedicated date
+// field existed. Those documents stored a formatted heading, a large literal
+// space run, and the date as the first paragraph in details.
+func (r *Resume) migrateLegacyHeadings() {
+	for index := range r.Entries {
+		entry := &r.Entries[index]
+		if strings.TrimSpace(entry.Overview) != "" || strings.TrimSpace(entry.Date) != "" || len(entry.Details) == 0 {
+			continue
+		}
+		first := entry.Details[0]
+		if first.Kind != "paragraph" || !legacyHeadingTagRE.MatchString(first.HTML) {
+			continue
+		}
+		nodes, err := parseFragment(first.HTML)
+		if err != nil {
+			continue
+		}
+		var raw strings.Builder
+		for _, node := range nodes {
+			raw.WriteString(textContent(node))
+		}
+		overview, date := splitImportedHeading(raw.String())
+		if strings.TrimSpace(overview) == "" || strings.TrimSpace(date) == "" {
+			continue
+		}
+		entry.Overview = overview
+		entry.Date = date
+		entry.Details = entry.Details[1:]
 	}
 }
 
@@ -621,8 +655,15 @@ func renderAllowed(node *xhtml.Node) string {
 		case "br":
 			return "<br>"
 		case "span":
+			var styles []string
 			if size := elementFontSize(node); size != 0 {
-				return fmt.Sprintf(`<span style="font-size: %dpx;">%s</span>`, size, children)
+				styles = append(styles, fmt.Sprintf("font-size: %dpx", size))
+			}
+			if elementFloatsRight(node) {
+				styles = append(styles, "float: right")
+			}
+			if len(styles) > 0 {
+				return fmt.Sprintf(`<span style="%s;">%s</span>`, strings.Join(styles, "; "), children)
 			}
 			return children
 		default:
@@ -652,6 +693,18 @@ func elementFontSize(node *xhtml.Node) int {
 		return 0
 	}
 	return 0
+}
+
+func elementFloatsRight(node *xhtml.Node) bool {
+	if node == nil || node.Type != xhtml.ElementNode {
+		return false
+	}
+	for _, attr := range node.Attr {
+		if strings.EqualFold(attr.Key, "style") && floatRightRE.MatchString(attr.Val) {
+			return true
+		}
+	}
+	return false
 }
 
 func renderChildren(node *xhtml.Node) string {

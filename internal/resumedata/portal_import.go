@@ -139,12 +139,47 @@ func importBlocks(source string) ([]Block, string, string) {
 	heading := ""
 	date := ""
 	if len(blocks) > 0 && blocks[0].Kind == "paragraph" {
-		if firstIsBold(nodes) {
-			heading, date = splitImportedHeading(html.UnescapeString(stripTags(blocks[0].HTML)))
+		rawHeading := html.UnescapeString(stripTags(blocks[0].HTML))
+		legacyHeading, legacyDate := splitImportedHeading(rawHeading)
+		if firstIsBold(nodes) || legacyDate != "" {
+			if floatedDate := firstFloatedDate(nodes); floatedDate != "" {
+				date = CompatibleText(floatedDate)
+				rawHeading = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rawHeading), floatedDate))
+				heading = CompatibleText(rawHeading)
+			} else if legacyDate != "" {
+				heading, date = legacyHeading, legacyDate
+			} else {
+				heading, date = splitImportedHeading(rawHeading)
+			}
 			blocks = blocks[1:]
 		}
 	}
 	return blocks, strings.TrimSpace(heading), strings.TrimSpace(date)
+}
+
+func firstFloatedDate(nodes []*xhtml.Node) string {
+	for _, node := range nodes {
+		if node.Type == xhtml.TextNode && strings.TrimSpace(node.Data) == "" {
+			continue
+		}
+		return floatedDateText(node)
+	}
+	return ""
+}
+
+func floatedDateText(node *xhtml.Node) string {
+	if node == nil {
+		return ""
+	}
+	if node.Type == xhtml.ElementNode && node.Data == "span" && elementFloatsRight(node) {
+		return strings.TrimSpace(textContent(node))
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if value := floatedDateText(child); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func splitImportedHeading(value string) (string, string) {

@@ -39,8 +39,16 @@
   const MIN_FONT_SIZE = 8;
   const MAX_FONT_SIZE = 24;
   const MAX_GAP_PIXELS = 24;
-  const PORTAL_HEADING_WIDTH = 680;
+  const PORTAL_HEADING_WIDTH = 571;
   const MIN_HEADING_SPACES = 4;
+  const CALIBRI_ASCII_WIDTHS = [
+    226, 0, 0, 498, 0, 714, 682, 220, 303, 303, 0, 498, 249, 306, 252, 386,
+    506, 506, 506, 506, 506, 506, 506, 506, 506, 506, 267, 0, 0, 0, 0, 0,
+    0, 578, 543, 533, 615, 488, 459, 630, 623, 251, 318, 519, 420, 854, 645, 662,
+    516, 672, 542, 459, 487, 641, 567, 889, 519, 487, 0, 306, 0, 306, 0, 498,
+    0, 479, 525, 422, 525, 497, 305, 470, 525, 229, 239, 454, 229, 798, 525, 527,
+    525, 525, 348, 391, 334, 525, 451, 714, 433, 452, 395, 0, 460, 0, 0
+  ];
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -213,6 +221,7 @@
             .filter((id) => VARIANT_IDS.includes(id))
         };
         if (entry && entry.hidden === true) normalized.hidden = true;
+        migrateLegacyEntryHeading(normalized);
         return normalized;
       })
     };
@@ -338,6 +347,7 @@
         const match = (node.style.fontSize || "").match(/^(\d{1,2})px$/);
         const size = match ? Number(match[1]) : 0;
         if (size >= MIN_FONT_SIZE && size <= MAX_FONT_SIZE) element.style.fontSize = `${size}px`;
+        if (node.style.getPropertyValue("float") === "right") element.style.setProperty("float", "right");
       }
 
       if (isBlock && (tag === "P" || tag === "LI")) {
@@ -635,12 +645,10 @@
   }
 
   function headingRuneWidth(character) {
-    if (character === " ") return 278;
-    if ("fijltI.,:;!'|[](){}".includes(character)) return 278;
-    if ("-_/\\".includes(character)) return 333;
-    if ("mwMW@%&QO".includes(character)) return 833;
-    if (/^[A-Z]$/.test(character)) return 667;
-    return 556;
+    const code = character.codePointAt(0);
+    if (code === 160) return 226;
+    if (code >= 32 && code <= 126 && CALIBRI_ASCII_WIDTHS[code - 32] > 0) return CALIBRI_ASCII_WIDTHS[code - 32];
+    return 498;
   }
 
   function headingTextWidth(value) {
@@ -683,6 +691,19 @@
     };
   }
 
+  function migrateLegacyEntryHeading(entry) {
+    if (text(entry.overview).trim() || text(entry.date).trim() || !entry.details.length) return;
+    const first = entry.details[0];
+    if (!first || first.kind !== "paragraph" || !/<(?:strong|b|em|i)(?:\s|>)/i.test(first.html)) return;
+    const template = document.createElement("template");
+    template.innerHTML = first.html;
+    const heading = splitImportedHeading(template.content.textContent || "");
+    if (!heading.overview || !heading.date) return;
+    entry.overview = heading.overview;
+    entry.date = heading.date;
+    entry.details = entry.details.slice(1);
+  }
+
   function portalEntryContent(html) {
     const template = document.createElement("template");
     template.innerHTML = sanitizeBlockHtml(html, false);
@@ -696,7 +717,14 @@
       const lineText = (first.textContent || "").trim();
       const strongText = strong ? (strong.textContent || "").trim() : "";
       if (strong && lineText && lineText === strongText) {
-        heading = splitImportedHeading(first.textContent || "");
+        const floatedDate = Array.from(first.querySelectorAll("span")).find((span) => span.style.getPropertyValue("float") === "right");
+        if (floatedDate) {
+          heading.date = portalCompatibleText(floatedDate.textContent || "").replace(/\s+/g, " ").trim();
+          floatedDate.remove();
+          heading.overview = portalCompatibleText(first.textContent || "").replace(/\s+/g, " ").trim();
+        } else {
+          heading = splitImportedHeading(first.textContent || "");
+        }
         first.remove();
       }
     }

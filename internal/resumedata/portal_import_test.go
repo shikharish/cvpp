@@ -80,3 +80,36 @@ func TestConvertPortalFormSplitsCalculatedHeadingDate(t *testing.T) {
 		t.Fatalf("details = %#v", entry.Details)
 	}
 }
+
+func TestConvertPortalFormRecoversFloatedDateHeading(t *testing.T) {
+	resume, err := ConvertPortalForm(url.Values{
+		"standard7": {"Internship"},
+		"subject7":  {`<p><span style="font-size: 10px;"><strong><span style="float: right;">[Jul'26]</span>Software Engineering Intern | Google, India</strong></span></p><ul><li>Built safely</li></ul>`},
+		"7resume1":  {"Y"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := resume.Entries[0]
+	if entry.Overview != "Software Engineering Intern | Google, India" || entry.Date != "[Jul'26]" {
+		t.Fatalf("heading fields = overview %q, date %q", entry.Overview, entry.Date)
+	}
+}
+
+func TestConvertPortalFormPromotesLegacyMixedStyleHeading(t *testing.T) {
+	resume, err := ConvertPortalForm(url.Values{
+		"standard7": {"Project"},
+		"subject7":  {`<p><span><strong>High-Performance Cedar Authorization Engine | </strong><em>Rust, Cedar Policy Language</em><strong>                                                                                                                  [Mar'26 - Jul'26]</strong></span></p><ul><li>Built safely</li></ul>`},
+		"7resume1":  {"Y"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := resume.Entries[0]
+	if entry.Overview != "High-Performance Cedar Authorization Engine | Rust, Cedar Policy Language" || entry.Date != "[Mar'26 - Jul'26]" {
+		t.Fatalf("heading fields = overview %q, date %q", entry.Overview, entry.Date)
+	}
+	if len(entry.Details) != 1 || entry.Details[0].HTML != "Built safely" {
+		t.Fatalf("details = %#v", entry.Details)
+	}
+}

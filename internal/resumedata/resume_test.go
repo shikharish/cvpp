@@ -53,7 +53,7 @@ func TestResumeDefaultFontSizeControlsPortalOutput(t *testing.T) {
 	}
 }
 
-func TestEntryDateUsesCalculatedHeadingSpacing(t *testing.T) {
+func TestEntryDateUsesExactERPHeadingSpacing(t *testing.T) {
 	entry := Entry{
 		ID:        "dated-entry",
 		Type:      "Experience",
@@ -63,19 +63,58 @@ func TestEntryDateUsesCalculatedHeadingSpacing(t *testing.T) {
 		IncludeIn: []string{"cv1"},
 	}
 	spaces := headingSpacerCount(entry.Overview, entry.Date, PortalFontSize)
-	if spaces <= minHeadingSpaces {
-		t.Fatalf("heading spacer count = %d, want a calculated gap", spaces)
-	}
 	target := PortalHeadingWidth * 1000 / PortalFontSize
 	used := headingTextWidth(entry.Overview) + spaces*headingRuneWidth(' ') + headingTextWidth(entry.Date)
 	if remaining := target - used; remaining < 0 || remaining >= headingRuneWidth(' ') {
-		t.Fatalf("heading width remainder = %d, want 0-%d units", remaining, headingRuneWidth(' ')-1)
+		t.Fatalf("heading width remainder = %d, want 0-%d Calibri units", remaining, headingRuneWidth(' ')-1)
 	}
-
 	subject := EntrySubjectHTML(entry)
-	gap := strings.Repeat("&nbsp;", spaces)
-	if !strings.Contains(subject, `<strong>`+entry.Overview+gap+entry.Date+`</strong>`) {
-		t.Fatalf("entry date was not appended with calculated spacing: %s", subject)
+	want := `<strong>` + entry.Overview + strings.Repeat("&nbsp;", spaces) + entry.Date + `</strong>`
+	if !strings.Contains(subject, want) {
+		t.Fatalf("entry date was not appended with conservative spacing: %s", subject)
+	}
+}
+
+func TestLongEntryDateUsesExactERPHeadingSpacing(t *testing.T) {
+	overview := "Direction-Conditioned Policies for Online Goal-Conditioned RL | CompLearn Workshop, ICML 2026"
+	date := "[Jul'26]"
+	if got := headingTextWidth(overview); got != 39893 {
+		t.Fatalf("Calibri heading width = %d, want 39893", got)
+	}
+	if got := headingSpacerCount(overview, date, PortalFontSize); got != 63 {
+		t.Fatalf("heading spaces = %d, want 63", got)
+	}
+}
+
+func TestEntryDateSpacingScalesWithDefaultFontSize(t *testing.T) {
+	for _, fontSize := range []int{8, 10, 12, 16, 24} {
+		overview := "Acme"
+		date := "[2026]"
+		spaces := headingSpacerCount(overview, date, fontSize)
+		target := PortalHeadingWidth * 1000 / fontSize
+		used := headingTextWidth(overview) + spaces*headingRuneWidth(' ') + headingTextWidth(date)
+		if remaining := target - used; remaining < 0 || remaining >= headingRuneWidth(' ') {
+			t.Fatalf("font size %d leaves %d Calibri units, want 0-%d", fontSize, remaining, headingRuneWidth(' ')-1)
+		}
+	}
+}
+
+func TestMigrateLegacyFormattedHeading(t *testing.T) {
+	resume := Resume{Entries: []Entry{{
+		Overview: "",
+		Date:     "",
+		Details: []Block{
+			{Kind: "paragraph", HTML: `<span><strong>High-Performance Cedar Authorization Engine | </strong><em>Rust, Cedar Policy Language</em><strong>                                                                                                                  [Mar'26 - Jul'26]</strong></span>`},
+			{Kind: "bullet", HTML: "Built the engine."},
+		},
+	}}}
+	resume.migrateLegacyHeadings()
+	entry := resume.Entries[0]
+	if entry.Overview != "High-Performance Cedar Authorization Engine | Rust, Cedar Policy Language" || entry.Date != "[Mar'26 - Jul'26]" {
+		t.Fatalf("migrated heading = overview %q, date %q", entry.Overview, entry.Date)
+	}
+	if len(entry.Details) != 1 || entry.Details[0].HTML != "Built the engine." {
+		t.Fatalf("migrated details = %#v", entry.Details)
 	}
 }
 
